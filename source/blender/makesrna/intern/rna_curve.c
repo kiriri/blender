@@ -1647,6 +1647,15 @@ static void rna_def_curve(BlenderRNA *brna)
   RNA_def_property_update(prop, 0, "rna_Curve_update_data");
 
   /* Number values */
+  prop = RNA_def_property(srna, "bevel_material_offset", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, NULL, "bevel_mat_offset");
+  RNA_def_property_ui_range(prop, -1024, 1024, 1, -1);
+  RNA_def_property_range(prop, -1024, 1024);
+  RNA_def_property_ui_text(
+      prop, "Material Offset", "Material offset of fill geometry (0 uses same material as the curve/bevel/extrude)");
+  RNA_def_property_update(prop, 0, "rna_Curve_update_data");
+
+
   prop = RNA_def_property(srna, "bevel_resolution", PROP_INT, PROP_NONE);
   RNA_def_property_int_sdna(prop, NULL, "bevresol");
   RNA_def_property_range(prop, 0, 32);

@@ -230,7 +230,8 @@ typedef struct Curve {
 
   /** Keep a short because of BKE_object_obdata_texspace_get(). */
   short texflag;
-  char _pad0[6];
+  short bevel_mat_offset;
+  char _pad0[4];
   short twist_mode;
   float twist_smooth, smallcaps_scale;
 
