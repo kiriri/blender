@@ -553,7 +553,7 @@ static void bevels_to_filledpoly(const Curve *cu, ListBase *dispbase)
           dlnew->parts = 1;
           dlnew->type = DL_POLY;
           dlnew->flag = DL_BACK_CURVE;
-          dlnew->col = std::max(std::min(dl->col + cu->bevel_mat_offset, (int)cu->totcol-1), 0);
+          dlnew->col = std::max(std::min(dl->col + cu->fill_mat_offset, (int)cu->totcol-1), 0);
           dlnew->charidx = dl->charidx;
 
           const float *old_verts = dl->verts;
@@ -572,7 +572,7 @@ static void bevels_to_filledpoly(const Curve *cu, ListBase *dispbase)
           dlnew->parts = 1;
           dlnew->type = DL_POLY;
           dlnew->flag = DL_FRONT_CURVE;
-          dlnew->col = std::max(std::min(dl->col + cu->bevel_mat_offset, (int)cu->totcol-1), 0);
+          dlnew->col = std::max(std::min(dl->col + cu->fill_mat_offset, (int)cu->totcol-1), 0);
           dlnew->charidx = dl->charidx;
 
           const float *old_verts = dl->verts + 3 * (dl->nr - 1);
