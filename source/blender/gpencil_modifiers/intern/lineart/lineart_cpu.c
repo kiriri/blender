@@ -41,6 +41,7 @@
 #include "BKE_gpencil.h"
 #include "BKE_gpencil_geom.h"
 #include "BKE_gpencil_modifier.h"
+#include "BKE_lib_id.h"
 #include "BKE_material.h"
 #include "BKE_mesh.h"
 #include "BKE_object.h"
@@ -1691,8 +1692,7 @@ static void lineart_geometry_object_load(LineartObjectInfo *obi, LineartRenderBu
   }
 
   if (obi->free_use_mesh) {
-    BKE_mesh_free(obi->original_me);
-    MEM_freeN(obi->original_me);
+    BKE_id_free(NULL, obi->original_me);
   }
 
   if (rb->remove_doubles) {
@@ -1968,8 +1968,8 @@ static int lineart_usage_check(Collection *c, Object *ob, bool is_render)
 
   if (c->gobject.first) {
     if (BKE_collection_has_object(c, (Object *)(ob->id.orig_id))) {
-      if ((is_render && (c->flag & COLLECTION_RESTRICT_RENDER)) ||
-          ((!is_render) && (c->flag & COLLECTION_RESTRICT_VIEWPORT))) {
+      if ((is_render && (c->flag & COLLECTION_HIDE_RENDER)) ||
+          ((!is_render) && (c->flag & COLLECTION_HIDE_VIEWPORT))) {
         return OBJECT_LRT_EXCLUDE;
       }
       if (ob->lineart.usage == OBJECT_LRT_INHERIT) {

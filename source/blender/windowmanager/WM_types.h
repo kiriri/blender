@@ -111,6 +111,8 @@
 struct ID;
 struct ImBuf;
 struct bContext;
+struct wmDrag;
+struct wmDropBox;
 struct wmEvent;
 struct wmOperator;
 struct wmWindowManager;
@@ -326,11 +328,10 @@ typedef struct wmNotifier {
 #define ND_LAYOUTDELETE (2 << 16)
 #define ND_ANIMPLAY (4 << 16)
 #define ND_GPENCIL (5 << 16)
-#define ND_EDITOR_CHANGED (6 << 16) /* Sent to new editors after switching to them. */
-#define ND_LAYOUTSET (7 << 16)
-#define ND_SKETCH (8 << 16)
-#define ND_WORKSPACE_SET (9 << 16)
-#define ND_WORKSPACE_DELETE (10 << 16)
+#define ND_LAYOUTSET (6 << 16)
+#define ND_SKETCH (7 << 16)
+#define ND_WORKSPACE_SET (8 << 16)
+#define ND_WORKSPACE_DELETE (9 << 16)
 
 /* NC_SCENE Scene */
 #define ND_SCENEBROWSE (1 << 16)
@@ -934,6 +935,11 @@ typedef struct wmDragAsset {
   int import_type; /* eFileAssetImportType */
 } wmDragAsset;
 
+typedef char *(*WMDropboxTooltipFunc)(struct bContext *,
+                                      struct wmDrag *,
+                                      const struct wmEvent *event,
+                                      struct wmDropBox *drop);
+
 typedef struct wmDrag {
   struct wmDrag *next, *prev;
 
@@ -949,8 +955,8 @@ typedef struct wmDrag {
   float scale;
   int sx, sy;
 
-  /** If set, draws operator name. */
-  char opname[200];
+  /** If filled, draws operator tooltip/operator name. */
+  char tooltip[200];
   unsigned int flags;
 
   /** List of wmDragIDs, all are guaranteed to have the same ID type. */
@@ -964,8 +970,8 @@ typedef struct wmDrag {
 typedef struct wmDropBox {
   struct wmDropBox *next, *prev;
 
-  /** Test if the dropbox is active, then can print optype name. */
-  bool (*poll)(struct bContext *, struct wmDrag *, const wmEvent *, const char **);
+  /** Test if the dropbox is active. */
+  bool (*poll)(struct bContext *, struct wmDrag *, const wmEvent *);
 
   /** Before exec, this copies drag info to #wmDrop properties. */
   void (*copy)(struct wmDrag *, struct wmDropBox *);
@@ -975,6 +981,9 @@ typedef struct wmDropBox {
    * `copy()` resources.
    */
   void (*cancel)(struct Main *, struct wmDrag *, struct wmDropBox *);
+
+  /** Custom tooltip shown during dragging. */
+  WMDropboxTooltipFunc tooltip;
 
   /**
    * If poll succeeds, operator is called.

@@ -1860,10 +1860,16 @@ void MESH_OT_loop_select(wmOperatorType *ot)
   ot->flag = OPTYPE_UNDO;
 
   /* properties */
-  RNA_def_boolean(ot->srna, "extend", 0, "Extend Select", "Extend the selection");
-  RNA_def_boolean(ot->srna, "deselect", 0, "Deselect", "Remove from the selection");
-  RNA_def_boolean(ot->srna, "toggle", 0, "Toggle Select", "Toggle the selection");
-  RNA_def_boolean(ot->srna, "ring", 0, "Select Ring", "Select ring");
+  PropertyRNA *prop;
+
+  prop = RNA_def_boolean(ot->srna, "extend", 0, "Extend Select", "Extend the selection");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+  prop = RNA_def_boolean(ot->srna, "deselect", 0, "Deselect", "Remove from the selection");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+  prop = RNA_def_boolean(ot->srna, "toggle", 0, "Toggle Select", "Toggle the selection");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+  prop = RNA_def_boolean(ot->srna, "ring", 0, "Select Ring", "Select ring");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
 void MESH_OT_edgering_select(wmOperatorType *ot)
@@ -1880,10 +1886,16 @@ void MESH_OT_edgering_select(wmOperatorType *ot)
   /* flags */
   ot->flag = OPTYPE_UNDO;
 
-  RNA_def_boolean(ot->srna, "extend", 0, "Extend", "Extend the selection");
-  RNA_def_boolean(ot->srna, "deselect", 0, "Deselect", "Remove from the selection");
-  RNA_def_boolean(ot->srna, "toggle", 0, "Toggle Select", "Toggle the selection");
-  RNA_def_boolean(ot->srna, "ring", 1, "Select Ring", "Select ring");
+  /* Properties. */
+  PropertyRNA *prop;
+  prop = RNA_def_boolean(ot->srna, "extend", 0, "Extend", "Extend the selection");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+  prop = RNA_def_boolean(ot->srna, "deselect", 0, "Deselect", "Remove from the selection");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+  prop = RNA_def_boolean(ot->srna, "toggle", 0, "Toggle Select", "Toggle the selection");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+  prop = RNA_def_boolean(ot->srna, "ring", 1, "Select Ring", "Select ring");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
 /** \} */
@@ -4859,8 +4871,15 @@ static int edbm_select_axis_exec(bContext *C, wmOperator *op)
   float axis_mat[3][3];
 
   /* 3D view variables may be NULL, (no need to check in poll function). */
-  ED_transform_calc_orientation_from_type_ex(
-      C, axis_mat, scene, CTX_wm_region_view3d(C), obedit, obedit, orientation, V3D_AROUND_ACTIVE);
+  ED_transform_calc_orientation_from_type_ex(scene,
+                                             view_layer,
+                                             CTX_wm_view3d(C),
+                                             CTX_wm_region_view3d(C),
+                                             obedit,
+                                             obedit,
+                                             orientation,
+                                             V3D_AROUND_ACTIVE,
+                                             axis_mat);
 
   const float *axis_vector = axis_mat[axis];
 

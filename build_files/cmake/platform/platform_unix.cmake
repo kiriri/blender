@@ -99,6 +99,7 @@ endif()
 find_package_wrapper(JPEG REQUIRED)
 find_package_wrapper(PNG REQUIRED)
 find_package_wrapper(ZLIB REQUIRED)
+find_package_wrapper(Zstd REQUIRED)
 find_package_wrapper(Freetype REQUIRED)
 
 if(WITH_PYTHON)
@@ -580,6 +581,8 @@ if(WITH_GHOST_WAYLAND)
   pkg_check_modules(xkbcommon REQUIRED xkbcommon)
   pkg_check_modules(wayland-cursor REQUIRED wayland-cursor)
   pkg_check_modules(dbus REQUIRED dbus-1)
+
+  set(WITH_GL_EGL ON)
 
   list(APPEND PLATFORM_LINKLIBS
     ${wayland-client_LINK_LIBRARIES}

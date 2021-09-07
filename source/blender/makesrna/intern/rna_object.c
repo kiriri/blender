@@ -218,6 +218,12 @@ static EnumPropertyItem instance_items_pointcloud[] = {
     {OB_DUPLIVERTS, "POINTS", 0, "Points", "Instantiate child objects on all points"},
     {0, NULL, 0, NULL, NULL},
 };
+
+static EnumPropertyItem instance_items_empty[] = {
+    {0, "NONE", 0, "None", ""},
+    INSTANCE_ITEM_COLLECTION,
+    {0, NULL, 0, NULL, NULL},
+};
 #endif
 #undef INSTANCE_ITEMS_SHARED
 #undef INSTANCE_ITEM_COLLECTION
@@ -751,7 +757,7 @@ static const EnumPropertyItem *rna_Object_instance_type_itemf(bContext *UNUSED(C
   const EnumPropertyItem *item;
 
   if (ob->type == OB_EMPTY) {
-    item = instance_items;
+    item = instance_items_empty;
   }
   else if (ob->type == OB_POINTCLOUD) {
     item = instance_items_pointcloud;
@@ -1320,8 +1326,8 @@ static int rna_Object_rotation_4d_editable(PointerRNA *ptr, int index)
 
 static int rna_MaterialSlot_index(PointerRNA *ptr)
 {
-  /* There is an offset of one, so that `ptr->data` is not null. */
-  return POINTER_AS_INT(ptr->data) - 1;
+  /* There is an offset, so that `ptr->data` is not null and unique across IDs. */
+  return (uintptr_t)ptr->data - (uintptr_t)ptr->owner_id;
 }
 
 static int rna_MaterialSlot_material_editable(PointerRNA *ptr, const char **UNUSED(r_info))
@@ -1484,10 +1490,11 @@ static void rna_Object_material_slots_next(CollectionPropertyIterator *iter)
 static PointerRNA rna_Object_material_slots_get(CollectionPropertyIterator *iter)
 {
   PointerRNA ptr;
-  RNA_pointer_create((ID *)iter->internal.count.ptr,
+  ID *id = (ID *)iter->internal.count.ptr;
+  RNA_pointer_create(id,
                      &RNA_MaterialSlot,
-                     /* Add one, so that `ptr->data` is not null. */
-                     POINTER_FROM_INT(iter->internal.count.item + 1),
+                     /* Add offset, so that `ptr->data` is not null and unique across IDs. */
+                     (void *)(iter->internal.count.item + (uintptr_t)id),
                      &ptr);
   return ptr;
 }
@@ -2927,6 +2934,97 @@ static void rna_def_object_lineart(BlenderRNA *brna)
   RNA_def_property_update(prop, 0, "rna_object_lineart_update");
 }
 
+static void rna_def_object_visibility(StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  /* Hide options. */
+  prop = RNA_def_property(srna, "hide_viewport", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "visibility_flag", OB_HIDE_VIEWPORT);
+  RNA_def_property_ui_text(prop, "Disable in Viewports", "Globally disable in viewports");
+  RNA_def_property_ui_icon(prop, ICON_RESTRICT_VIEW_OFF, -1);
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_hide_update");
+
+  prop = RNA_def_property(srna, "hide_select", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "visibility_flag", OB_HIDE_SELECT);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Disable Selection", "Disable selection in viewport");
+  RNA_def_property_ui_icon(prop, ICON_RESTRICT_SELECT_OFF, -1);
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_hide_update");
+
+  prop = RNA_def_property(srna, "hide_render", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "visibility_flag", OB_HIDE_RENDER);
+  RNA_def_property_ui_text(prop, "Disable in Renders", "Globally disable in renders");
+  RNA_def_property_ui_icon(prop, ICON_RESTRICT_RENDER_OFF, -1);
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_hide_update");
+
+  /* Instancer options. */
+  prop = RNA_def_property(srna, "show_instancer_for_render", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "duplicator_visibility_flag", OB_DUPLI_FLAG_RENDER);
+  RNA_def_property_ui_text(prop, "Render Instancer", "Make instancer visible when rendering");
+  RNA_def_property_update(
+      prop, NC_OBJECT | ND_DRAW, "rna_Object_duplicator_visibility_flag_update");
+
+  prop = RNA_def_property(srna, "show_instancer_for_viewport", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "duplicator_visibility_flag", OB_DUPLI_FLAG_VIEWPORT);
+  RNA_def_property_ui_text(prop, "Display Instancer", "Make instancer visible in the viewport");
+  RNA_def_property_update(
+      prop, NC_OBJECT | ND_DRAW, "rna_Object_duplicator_visibility_flag_update");
+
+  /* Ray visibility. */
+  prop = RNA_def_property(srna, "visible_camera", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, NULL, "visibility_flag", OB_HIDE_CAMERA);
+  RNA_def_property_ui_text(prop, "Camera Visibility", "Object visibility to camera rays");
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_internal_update_draw");
+
+  prop = RNA_def_property(srna, "visible_diffuse", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, NULL, "visibility_flag", OB_HIDE_DIFFUSE);
+  RNA_def_property_ui_text(prop, "Diffuse Visibility", "Object visibility to diffuse rays");
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_internal_update_draw");
+
+  prop = RNA_def_property(srna, "visible_glossy", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, NULL, "visibility_flag", OB_HIDE_GLOSSY);
+  RNA_def_property_ui_text(prop, "Glossy Visibility", "Object visibility to glossy rays");
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_internal_update_draw");
+
+  prop = RNA_def_property(srna, "visible_transmission", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, NULL, "visibility_flag", OB_HIDE_TRANSMISSION);
+  RNA_def_property_ui_text(
+      prop, "Transmission Visibility", "Object visibility to transmission rays");
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_internal_update_draw");
+
+  prop = RNA_def_property(srna, "visible_volume_scatter", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, NULL, "visibility_flag", OB_HIDE_VOLUME_SCATTER);
+  RNA_def_property_ui_text(
+      prop, "Volume Scatter Visibility", "Object visibility to volume scattering rays");
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_internal_update_draw");
+
+  prop = RNA_def_property(srna, "visible_shadow", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, NULL, "visibility_flag", OB_HIDE_SHADOW);
+  RNA_def_property_ui_text(prop, "Shadow Visibility", "Object visibility to shadow rays");
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_internal_update_draw");
+
+  /* Holdout and shadow catcher. */
+  prop = RNA_def_property(srna, "is_holdout", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "visibility_flag", OB_HOLDOUT);
+  RNA_def_property_ui_text(
+      prop,
+      "Holdout",
+      "Render objects as a holdout or matte, creating a hole in the image with zero alpha, to "
+      "fill out in compositing with real footage or another render");
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_hide_update");
+
+  prop = RNA_def_property(srna, "is_shadow_catcher", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, NULL, "visibility_flag", OB_SHADOW_CATCHER);
+  RNA_def_property_ui_text(
+      prop,
+      "Shadow Catcher",
+      "Only render shadows and reflections on this object, for compositing renders into real "
+      "footage. Objects with this setting are considered to already exist in the footage, "
+      "objects without it are synthetic objects being composited into it");
+  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_internal_update_draw");
+}
+
 static void rna_def_object(BlenderRNA *brna)
 {
   StructRNA *srna;
@@ -3506,37 +3604,7 @@ static void rna_def_object(BlenderRNA *brna)
   RNA_def_property_struct_type(prop, "RigidBodyConstraint");
   RNA_def_property_ui_text(prop, "Rigid Body Constraint", "Constraint constraining rigid bodies");
 
-  /* restrict */
-  prop = RNA_def_property(srna, "hide_viewport", PROP_BOOLEAN, PROP_NONE);
-  RNA_def_property_boolean_sdna(prop, NULL, "restrictflag", OB_RESTRICT_VIEWPORT);
-  RNA_def_property_ui_text(prop, "Disable in Viewports", "Globally disable in viewports");
-  RNA_def_property_ui_icon(prop, ICON_RESTRICT_VIEW_OFF, -1);
-  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_hide_update");
-
-  prop = RNA_def_property(srna, "hide_select", PROP_BOOLEAN, PROP_NONE);
-  RNA_def_property_boolean_sdna(prop, NULL, "restrictflag", OB_RESTRICT_SELECT);
-  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
-  RNA_def_property_ui_text(prop, "Disable Selection", "Disable selection in viewport");
-  RNA_def_property_ui_icon(prop, ICON_RESTRICT_SELECT_OFF, -1);
-  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_hide_update");
-
-  prop = RNA_def_property(srna, "hide_render", PROP_BOOLEAN, PROP_NONE);
-  RNA_def_property_boolean_sdna(prop, NULL, "restrictflag", OB_RESTRICT_RENDER);
-  RNA_def_property_ui_text(prop, "Disable in Renders", "Globally disable in renders");
-  RNA_def_property_ui_icon(prop, ICON_RESTRICT_RENDER_OFF, -1);
-  RNA_def_property_update(prop, NC_OBJECT | ND_DRAW, "rna_Object_hide_update");
-
-  prop = RNA_def_property(srna, "show_instancer_for_render", PROP_BOOLEAN, PROP_NONE);
-  RNA_def_property_boolean_sdna(prop, NULL, "duplicator_visibility_flag", OB_DUPLI_FLAG_RENDER);
-  RNA_def_property_ui_text(prop, "Render Instancer", "Make instancer visible when rendering");
-  RNA_def_property_update(
-      prop, NC_OBJECT | ND_DRAW, "rna_Object_duplicator_visibility_flag_update");
-
-  prop = RNA_def_property(srna, "show_instancer_for_viewport", PROP_BOOLEAN, PROP_NONE);
-  RNA_def_property_boolean_sdna(prop, NULL, "duplicator_visibility_flag", OB_DUPLI_FLAG_VIEWPORT);
-  RNA_def_property_ui_text(prop, "Display Instancer", "Make instancer visible in the viewport");
-  RNA_def_property_update(
-      prop, NC_OBJECT | ND_DRAW, "rna_Object_duplicator_visibility_flag_update");
+  rna_def_object_visibility(srna);
 
   /* instancing */
   prop = RNA_def_property(srna, "instance_type", PROP_ENUM, PROP_NONE);

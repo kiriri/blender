@@ -170,7 +170,7 @@ static void seq_convert_transform_crop(const Scene *scene,
   int image_size_x = scene->r.xsch;
   int image_size_y = scene->r.ysch;
 
-  /* Hardcoded legacy bit-flags which has been removed. */
+  /* Hard-coded legacy bit-flags which has been removed. */
   const uint32_t use_transform_flag = (1 << 16);
   const uint32_t use_crop_flag = (1 << 17);
 
@@ -687,7 +687,7 @@ void do_versions_after_linking_290(Main *bmain, ReportList *UNUSED(reports))
 
   if (!MAIN_VERSION_ATLEAST(bmain, 293, 16)) {
     LISTBASE_FOREACH (Scene *, scene, &bmain->scenes) {
-      seq_update_meta_disp_range(SEQ_editing_get(scene, false));
+      seq_update_meta_disp_range(SEQ_editing_get(scene));
     }
 
     /* Add a separate socket for Grid node X and Y size. */
@@ -1650,7 +1650,7 @@ void blo_do_versions_290(FileData *fd, Library *UNUSED(lib), Main *bmain)
     }
 
     LISTBASE_FOREACH (Scene *, scene, &bmain->scenes) {
-      Editing *ed = SEQ_editing_get(scene, false);
+      Editing *ed = SEQ_editing_get(scene);
       if (ed == NULL) {
         continue;
       }

@@ -891,11 +891,7 @@ static void free_softbody_baked(SoftBody *sb)
       MEM_freeN(key);
     }
   }
-  if (sb->keys) {
-    MEM_freeN(sb->keys);
-  }
-
-  sb->keys = NULL;
+  MEM_SAFE_FREE(sb->keys);
   sb->totkey = 0;
 }
 static void free_scratch(SoftBody *sb)
@@ -2225,7 +2221,7 @@ static void sb_cf_threads_run(Scene *scene,
     totthread--;
   }
 
-  /* printf("sb_cf_threads_run spawning %d threads\n", totthread); */
+  // printf("sb_cf_threads_run spawning %d threads\n", totthread);
 
   sb_threads = MEM_callocN(sizeof(SB_thread_context) * totthread, "SBThread");
   memset(sb_threads, 0, sizeof(SB_thread_context) * totthread);
@@ -2281,7 +2277,7 @@ static void softbody_calc_forces(
   float fieldfactor = -1.0f, windfactor = 0.25;
   int do_deflector /*, do_selfcollision */, do_springcollision, do_aero;
 
-  /* gravity = sb->grav * sb_grav_force_scale(ob); */ /* UNUSED */
+  // gravity = sb->grav * sb_grav_force_scale(ob); /* UNUSED */
 
   /* check conditions for various options */
   do_deflector = query_external_colliders(depsgraph, sb->collision_group);
@@ -2753,7 +2749,7 @@ static void mesh_to_softbody(Object *ob)
       build_bps_springlist(ob); /* scan for springs attached to bodypoints ONCE */
       /* insert *other second order* springs if desired */
       if (sb->secondspring > 0.0000001f) {
-        /* exploits the first run of build_bps_springlist(ob); */
+        /* Exploits the first run of `build_bps_springlist(ob)`. */
         add_2nd_order_springs(ob, sb->secondspring);
         /* yes we need to do it again. */
         build_bps_springlist(ob);
@@ -2812,7 +2808,7 @@ static void reference_to_scratch(Object *ob)
   }
   mul_v3_fl(accu_pos, 1.0f / accu_mass);
   copy_v3_v3(sb->scratch->Ref.com, accu_pos);
-  /* printf("reference_to_scratch\n"); */
+  // printf("reference_to_scratch\n");
 }
 
 /*
@@ -3447,10 +3443,10 @@ static void softbody_step(
         float newtime = forcetime * 1.1f; /* hope for 1.1 times better conditions in next step */
 
         if (sb->scratch->flag & SBF_DOFUZZY) {
-          ///* stay with this stepsize unless err really small */
+          // /* stay with this stepsize unless err really small */
           // if (err > SoftHeunTol/(2.0f*sb->fuzzyness)) {
           newtime = forcetime;
-          //}
+          // }
         }
         else {
           if (err > SoftHeunTol / 2.0f) { /* stay with this stepsize unless err really small */

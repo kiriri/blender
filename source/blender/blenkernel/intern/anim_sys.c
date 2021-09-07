@@ -426,7 +426,7 @@ bool BKE_animsys_rna_path_resolve(PointerRNA *ptr,
 }
 
 /* less than 1.0 evaluates to false, use epsilon to avoid float error */
-#define ANIMSYS_FLOAT_AS_BOOL(value) ((value) > ((1.0f - FLT_EPSILON)))
+#define ANIMSYS_FLOAT_AS_BOOL(value) ((value) > (1.0f - FLT_EPSILON))
 
 bool BKE_animsys_read_from_rna_path(PathResolvedRNA *anim_rna, float *r_value)
 {
@@ -2625,7 +2625,7 @@ static void animsys_create_action_track_strip(const AnimData *adt,
 
   bAction *action = adt->action;
 
-  if ((adt->flag & ADT_NLA_EDIT_ON)) {
+  if (adt->flag & ADT_NLA_EDIT_ON) {
     action = adt->tmpact;
   }
 
@@ -2671,7 +2671,7 @@ static void animsys_create_action_track_strip(const AnimData *adt,
 static bool is_nlatrack_evaluatable(const AnimData *adt, const NlaTrack *nlt)
 {
   /* Skip disabled tracks unless it contains the tweaked strip. */
-  const bool contains_tweak_strip = (adt->flag & ADT_NLA_EDIT_ON) &&
+  const bool contains_tweak_strip = (adt->flag & ADT_NLA_EDIT_ON) && adt->act_track &&
                                     (nlt->index == adt->act_track->index);
   if ((nlt->flag & NLATRACK_DISABLED) && !contains_tweak_strip) {
     return false;

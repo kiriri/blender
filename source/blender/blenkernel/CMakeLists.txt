@@ -78,9 +78,9 @@ set(SRC
   intern/anim_visualization.c
   intern/appdir.c
   intern/armature.c
-  intern/armature_selection.cc
   intern/armature_deform.c
   intern/armature_pose.cc
+  intern/armature_selection.cc
   intern/armature_update.c
   intern/asset.cc
   intern/attribute.c
@@ -696,6 +696,13 @@ if(WITH_ALEMBIC)
     ../io/alembic
   )
   add_definitions(-DWITH_ALEMBIC)
+endif()
+
+if(WITH_USD)
+  list(APPEND INC
+    ../io/usd
+  )
+  add_definitions(-DWITH_USD)
 endif()
 
 if(WITH_OPENSUBDIV)

@@ -333,7 +333,7 @@ static void gpencil_interpolate_smooth_stroke(bGPDstroke *gps,
   float reduce = 0.0f;
   for (int r = 0; r < smooth_steps; r++) {
     for (int i = 0; i < gps->totpoints - 1; i++) {
-      BKE_gpencil_stroke_smooth(gps, i, smooth_factor - reduce);
+      BKE_gpencil_stroke_smooth_point(gps, i, smooth_factor - reduce);
       BKE_gpencil_stroke_smooth_strength(gps, i, smooth_factor);
     }
     reduce += 0.25f; /* reduce the factor */
@@ -890,9 +890,9 @@ static int gpencil_interpolate_modal(bContext *C, wmOperator *op, const wmEvent 
     }
     case MOUSEMOVE: /* calculate new position */
     {
-      /* only handle mousemove if not doing numinput */
+      /* Only handle mouse-move if not doing numeric-input. */
       if (has_numinput == false) {
-        /* update shift based on position of mouse */
+        /* Update shift based on position of mouse. */
         gpencil_mouse_update_shift(tgpi, op, event);
 
         /* update screen */
