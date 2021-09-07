@@ -61,12 +61,12 @@ ContinuationIndentWidth: 4
 # This tries to match Blender's style as much as possible. One
 BreakBeforeBraces: Custom
 BraceWrapping: {
-    AfterClass: 'false'
-    AfterControlStatement: 'false'
-    AfterEnum : 'false'
+    AfterClass: 'true'
+    AfterControlStatement: 'true'
+    AfterEnum : 'true'
     AfterFunction : 'true'
-    AfterNamespace : 'false'
-    AfterStruct : 'false'
+    AfterNamespace : 'true'
+    AfterStruct : 'true'
     AfterUnion : 'false'
     BeforeCatch : 'true'
     BeforeElse : 'true'
@@ -104,7 +104,7 @@ ReflowComments: true
 # Never use tabs for indentation.
 # Note: TabWidth and IndentWidth must be the same, or strange things happen.
 UseTab: Never
-TabWidth: 2
+TabWidth: 4
 IndentWidth: 2
 
 # Add a big penalty on breaking after the return type of functions. For example,

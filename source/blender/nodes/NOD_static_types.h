@@ -293,6 +293,7 @@ DefNode(GeometryNode, GEO_NODE_COLLECTION_INFO, def_geo_collection_info, "COLLEC
 DefNode(GeometryNode, GEO_NODE_CONVEX_HULL, 0, "CONVEX_HULL", ConvexHull, "Convex Hull", "")
 DefNode(GeometryNode, GEO_NODE_CURVE_ENDPOINTS, 0, "CURVE_ENDPOINTS", CurveEndpoints, "Curve Endpoints", "")
 DefNode(GeometryNode, GEO_NODE_CURVE_LENGTH, 0, "CURVE_LENGTH", CurveLength, "Curve Length", "")
+DefNode(GeometryNode, GEO_NODE_CURVE_BOOL, def_geo_curve_bool, "CURVE_BOOL", CurveBool, "Curve Bool", "")
 DefNode(GeometryNode, GEO_NODE_CURVE_PRIMITIVE_BEZIER_SEGMENT, def_geo_curve_primitive_bezier_segment, "CURVE_PRIMITIVE_BEZIER_SEGMENT", CurvePrimitiveBezierSegment, "Bezier Segment", "")
 DefNode(GeometryNode, GEO_NODE_CURVE_PRIMITIVE_CIRCLE, def_geo_curve_primitive_circle, "CURVE_PRIMITIVE_CIRCLE", CurvePrimitiveCircle, "Curve Circle", "")
 DefNode(GeometryNode, GEO_NODE_CURVE_PRIMITIVE_LINE, def_geo_curve_primitive_line, "CURVE_PRIMITIVE_LINE", CurvePrimitiveLine, "Curve Line", "")

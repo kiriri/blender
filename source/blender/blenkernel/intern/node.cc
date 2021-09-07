@@ -5139,6 +5139,7 @@ static void registerGeometryNodes()
   register_node_type_geo_convex_hull();
   register_node_type_geo_curve_endpoints();
   register_node_type_geo_curve_length();
+  register_node_type_geo_curve_bool();
   register_node_type_geo_curve_primitive_bezier_segment();
   register_node_type_geo_curve_primitive_circle();
   register_node_type_geo_curve_primitive_line();
