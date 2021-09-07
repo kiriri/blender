@@ -42,13 +42,13 @@ void PyC_Err_PrintWithFunc(PyObject *py_func);
 void PyC_FileAndNum(const char **r_filename, int *r_lineno);
 void PyC_FileAndNum_Safe(const char **r_filename, int *r_lineno); /* checks python is running */
 int PyC_AsArray_FAST(void *array,
-                     const size_t array_elem_size,
+                     const size_t array_item_size,
                      PyObject *value_fast,
                      const Py_ssize_t length,
                      const PyTypeObject *type,
                      const char *error_prefix);
 int PyC_AsArray(void *array,
-                const size_t array_elem_size,
+                const size_t array_item_size,
                 PyObject *value,
                 const Py_ssize_t length,
                 const PyTypeObject *type,
@@ -119,13 +119,13 @@ typedef struct PyC_FlagSet {
   const char *identifier;
 } PyC_FlagSet;
 
-PyObject *PyC_FlagSet_AsString(PyC_FlagSet *item);
-int PyC_FlagSet_ValueFromID_int(PyC_FlagSet *item, const char *identifier, int *r_value);
-int PyC_FlagSet_ValueFromID(PyC_FlagSet *item,
+PyObject *PyC_FlagSet_AsString(const PyC_FlagSet *item);
+int PyC_FlagSet_ValueFromID_int(const PyC_FlagSet *item, const char *identifier, int *r_value);
+int PyC_FlagSet_ValueFromID(const PyC_FlagSet *item,
                             const char *identifier,
                             int *r_value,
                             const char *error_prefix);
-int PyC_FlagSet_ToBitfield(PyC_FlagSet *items,
+int PyC_FlagSet_ToBitfield(const PyC_FlagSet *items,
                            PyObject *value,
                            int *r_value,
                            const char *error_prefix);

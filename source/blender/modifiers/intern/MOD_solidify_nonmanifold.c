@@ -71,6 +71,15 @@ static float angle_signed_on_axis_normalized_v3v3_v3(const float n[3],
   return angle;
 }
 
+static float clamp_nonzero(const float value, const float epsilon)
+{
+  BLI_assert(!(epsilon < 0.0f));
+  if (value < 0.0f) {
+    return min_ff(value, -epsilon);
+  }
+  return max_ff(value, epsilon);
+}
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -164,8 +173,8 @@ Mesh *MOD_solidify_nonmanifold_modifyMesh(ModifierData *md,
 
   const float ofs_front = (smd->offset_fac + 1.0f) * 0.5f * smd->offset;
   const float ofs_back = ofs_front - smd->offset * smd->offset_fac;
-  const float ofs_front_clamped = max_ff(1e-5f, fabsf(smd->offset > 0 ? ofs_front : ofs_back));
-  const float ofs_back_clamped = max_ff(1e-5f, fabsf(smd->offset > 0 ? ofs_back : ofs_front));
+  const float ofs_front_clamped = clamp_nonzero(smd->offset > 0 ? ofs_front : ofs_back, 1e-5f);
+  const float ofs_back_clamped = clamp_nonzero(smd->offset > 0 ? ofs_back : ofs_front, 1e-5f);
   const float offset_fac_vg = smd->offset_fac_vg;
   const float offset_fac_vg_inv = 1.0f - smd->offset_fac_vg;
   const float offset = fabsf(smd->offset) * smd->offset_clamp;
@@ -202,15 +211,8 @@ Mesh *MOD_solidify_nonmanifold_modifyMesh(ModifierData *md,
 
   /* Calculate only face normals. */
   poly_nors = MEM_malloc_arrayN(numPolys, sizeof(*poly_nors), __func__);
-  BKE_mesh_calc_normals_poly(orig_mvert,
-                             NULL,
-                             (int)numVerts,
-                             orig_mloop,
-                             orig_mpoly,
-                             (int)numLoops,
-                             (int)numPolys,
-                             poly_nors,
-                             true);
+  BKE_mesh_calc_normals_poly(
+      orig_mvert, (int)numVerts, orig_mloop, (int)numLoops, orig_mpoly, (int)numPolys, poly_nors);
 
   NewFaceRef *face_sides_arr = MEM_malloc_arrayN(
       numPolys * 2, sizeof(*face_sides_arr), "face_sides_arr in solidify");

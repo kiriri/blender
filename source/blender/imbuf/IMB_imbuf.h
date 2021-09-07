@@ -150,6 +150,14 @@ bool IMB_initImBuf(
 
 /**
  * Create a copy of a pixel buffer and wrap it to a new ImBuf
+ * (transferring ownership to the in imbuf).
+ * \attention Defined in allocimbuf.c
+ */
+struct ImBuf *IMB_allocFromBufferOwn(
+    unsigned int *rect, float *rectf, unsigned int w, unsigned int h, unsigned int channels);
+
+/**
+ * Create a copy of a pixel buffer and wrap it to a new ImBuf
  * \attention Defined in allocimbuf.c
  */
 struct ImBuf *IMB_allocFromBuffer(const unsigned int *rect,
@@ -365,6 +373,11 @@ void IMB_anim_index_rebuild_finish(struct IndexBuildContext *context, short stop
  * Return the length (in frames) of the given \a anim.
  */
 int IMB_anim_get_duration(struct anim *anim, IMB_Timecode_Type tc);
+
+/**
+ * Return the encoded start offset (in seconds) of the given \a anim.
+ */
+double IMD_anim_get_offset(struct anim *anim);
 
 /**
  * Return the fps contained in movie files (function rval is false,

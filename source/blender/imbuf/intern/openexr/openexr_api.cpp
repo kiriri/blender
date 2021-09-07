@@ -69,7 +69,7 @@
 
 extern "C" {
 
-// The following prevents a linking error in debug mode for MSVC using the libs in CVS
+/* The following prevents a linking error in debug mode for MSVC using the libs in SVN. */
 #if defined(WITH_OPENEXR) && defined(_WIN32) && defined(DEBUG) && _MSC_VER < 1900
 _CRTIMP void __cdecl _invalid_parameter_noinfo(void)
 {
@@ -1711,7 +1711,7 @@ static const char *exr_rgba_channelname(MultiPartInputFile &file, const char *ch
   const ChannelList &channels = file.header(0).channels();
 
   for (ChannelList::ConstIterator i = channels.begin(); i != channels.end(); ++i) {
-    /* const Channel &channel = i.channel(); */ /* Not used yet */
+    // const Channel &channel = i.channel(); /* Not used yet. */
     const char *str = i.name();
     int len = strlen(str);
     if (len) {

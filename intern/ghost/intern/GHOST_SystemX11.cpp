@@ -802,8 +802,7 @@ static bool checkTabletProximity(Display *display, XDevice *device)
 
   if (state) {
     XInputClass *cls = state->data;
-    // printf("%d class%s :\n", state->num_classes,
-    //       (state->num_classes > 1) ? "es" : "");
+    // printf("%d class%s :\n", state->num_classes, (state->num_classes > 1) ? "es" : "");
     for (int loop = 0; loop < state->num_classes; loop++) {
       switch (cls->c_class) {
         case ValuatorClass:
@@ -1923,7 +1922,7 @@ static GHOST_TKey ghost_key_from_keycode(const XkbDescPtr xkb_descr, const KeyCo
 
 #undef MAKE_ID
 
-/* from xclip.c xcout() v0.11 */
+/* From `xclip.c` #xcout() v0.11. */
 
 #define XCLIB_XCOUT_NONE 0          /* no context */
 #define XCLIB_XCOUT_SENTCONVSEL 1   /* sent a request */

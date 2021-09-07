@@ -602,7 +602,7 @@ static bool layer_collection_hidden(ViewLayer *view_layer, LayerCollection *lc)
   }
 
   /* Check visiblilty restriction flags */
-  if (lc->flag & LAYER_COLLECTION_HIDE || lc->collection->flag & COLLECTION_RESTRICT_VIEWPORT) {
+  if (lc->flag & LAYER_COLLECTION_HIDE || lc->collection->flag & COLLECTION_HIDE_VIEWPORT) {
     return true;
   }
 
@@ -1005,22 +1005,22 @@ static void layer_collection_objects_sync(ViewLayer *view_layer,
       BLI_addtail(r_lb_new_object_bases, base);
     }
 
-    if ((collection_restrict & COLLECTION_RESTRICT_VIEWPORT) == 0) {
+    if ((collection_restrict & COLLECTION_HIDE_VIEWPORT) == 0) {
       base->flag_from_collection |= (BASE_ENABLED_VIEWPORT | BASE_VISIBLE_DEPSGRAPH);
       if ((layer_restrict & LAYER_COLLECTION_HIDE) == 0) {
         base->flag_from_collection |= BASE_VISIBLE_VIEWLAYER;
       }
-      if (((collection_restrict & COLLECTION_RESTRICT_SELECT) == 0)) {
+      if (((collection_restrict & COLLECTION_HIDE_SELECT) == 0)) {
         base->flag_from_collection |= BASE_SELECTABLE;
       }
     }
 
-    if ((collection_restrict & COLLECTION_RESTRICT_RENDER) == 0) {
+    if ((collection_restrict & COLLECTION_HIDE_RENDER) == 0) {
       base->flag_from_collection |= BASE_ENABLED_RENDER;
     }
 
     /* Holdout and indirect only */
-    if (layer->flag & LAYER_COLLECTION_HOLDOUT) {
+    if ((layer->flag & LAYER_COLLECTION_HOLDOUT) || (base->object->visibility_flag & OB_HOLDOUT)) {
       base->flag_from_collection |= BASE_HOLDOUT;
     }
     if (layer->flag & LAYER_COLLECTION_INDIRECT_ONLY) {
@@ -1150,11 +1150,11 @@ static void layer_collection_sync(ViewLayer *view_layer,
 
     /* We separate restrict viewport and visible view layer because a layer collection can be
      * hidden in the view layer yet (locally) visible in a viewport (if it is not restricted). */
-    if (child_collection_restrict & COLLECTION_RESTRICT_VIEWPORT) {
-      child_layer->runtime_flag |= LAYER_COLLECTION_RESTRICT_VIEWPORT;
+    if (child_collection_restrict & COLLECTION_HIDE_VIEWPORT) {
+      child_layer->runtime_flag |= LAYER_COLLECTION_HIDE_VIEWPORT;
     }
 
-    if (((child_layer->runtime_flag & LAYER_COLLECTION_RESTRICT_VIEWPORT) == 0) &&
+    if (((child_layer->runtime_flag & LAYER_COLLECTION_HIDE_VIEWPORT) == 0) &&
         ((child_layer_restrict & LAYER_COLLECTION_HIDE) == 0)) {
       child_layer->runtime_flag |= LAYER_COLLECTION_VISIBLE_VIEW_LAYER;
     }
@@ -1173,6 +1173,52 @@ static void layer_collection_sync(ViewLayer *view_layer,
                                 parent_layer_restrict,
                                 parent_local_collections_bits);
 }
+
+#ifndef NDEBUG
+static bool view_layer_objects_base_cache_validate(ViewLayer *view_layer, LayerCollection *layer)
+{
+  bool is_valid = true;
+
+  if (layer == NULL) {
+    layer = view_layer->layer_collections.first;
+  }
+
+  /* Only check for a collection's objects if its layer is not excluded. */
+  if ((layer->flag & LAYER_COLLECTION_EXCLUDE) == 0) {
+    LISTBASE_FOREACH (CollectionObject *, cob, &layer->collection->gobject) {
+      if (cob->ob == NULL) {
+        continue;
+      }
+      if (BLI_ghash_lookup(view_layer->object_bases_hash, cob->ob) == NULL) {
+        CLOG_FATAL(
+            &LOG,
+            "Object '%s' from collection '%s' has no entry in view layer's object bases cache",
+            cob->ob->id.name + 2,
+            layer->collection->id.name + 2);
+        is_valid = false;
+        break;
+      }
+    }
+  }
+
+  if (is_valid) {
+    LISTBASE_FOREACH (LayerCollection *, layer_child, &layer->layer_collections) {
+      if (!view_layer_objects_base_cache_validate(view_layer, layer_child)) {
+        is_valid = false;
+        break;
+      }
+    }
+  }
+
+  return is_valid;
+}
+#else
+static bool view_layer_objects_base_cache_validate(ViewLayer *UNUSED(view_layer),
+                                                   LayerCollection *UNUSED(layer))
+{
+  return true;
+}
+#endif
 
 /**
  * Update view layer collection tree from collections used in the scene.
@@ -1240,12 +1286,20 @@ void BKE_layer_collection_sync(const Scene *scene, ViewLayer *view_layer)
     }
 
     if (base->object) {
+      /* Those asserts are commented, since they are too expensive to perform even in debug, as
+       * this layer resync function currently gets called way too often. */
+#if 0
+      BLI_assert(BLI_findindex(&new_object_bases, base) == -1);
+      BLI_assert(BLI_findptr(&new_object_bases, base->object, offsetof(Base, object)) == NULL);
+#endif
       BLI_ghash_remove(view_layer->object_bases_hash, base->object, NULL, NULL);
     }
   }
 
   BLI_freelistN(&view_layer->object_bases);
   view_layer->object_bases = new_object_bases;
+
+  view_layer_objects_base_cache_validate(view_layer, NULL);
 
   LISTBASE_FOREACH (Base *, base, &view_layer->object_bases) {
     BKE_base_eval_flags(base);
@@ -1333,7 +1387,7 @@ void BKE_main_collection_sync_remap(const Main *bmain)
  */
 bool BKE_layer_collection_objects_select(ViewLayer *view_layer, LayerCollection *lc, bool deselect)
 {
-  if (lc->collection->flag & COLLECTION_RESTRICT_SELECT) {
+  if (lc->collection->flag & COLLECTION_HIDE_SELECT) {
     return false;
   }
 
@@ -1369,7 +1423,7 @@ bool BKE_layer_collection_objects_select(ViewLayer *view_layer, LayerCollection 
 
 bool BKE_layer_collection_has_selected_objects(ViewLayer *view_layer, LayerCollection *lc)
 {
-  if (lc->collection->flag & COLLECTION_RESTRICT_SELECT) {
+  if (lc->collection->flag & COLLECTION_HIDE_SELECT) {
     return false;
   }
 
@@ -1457,7 +1511,7 @@ bool BKE_object_is_visible_in_viewport(const View3D *v3d, const struct Object *o
 {
   BLI_assert(v3d != NULL);
 
-  if (ob->restrictflag & OB_RESTRICT_VIEWPORT) {
+  if (ob->visibility_flag & OB_HIDE_VIEWPORT) {
     return false;
   }
 
@@ -2146,14 +2200,14 @@ void BKE_base_eval_flags(Base *base)
   base->flag |= (base->flag_from_collection & g_base_collection_flags);
 
   /* Apply object restrictions. */
-  const int object_restrict = base->object->restrictflag;
-  if (object_restrict & OB_RESTRICT_VIEWPORT) {
+  const int object_restrict = base->object->visibility_flag;
+  if (object_restrict & OB_HIDE_VIEWPORT) {
     base->flag &= ~BASE_ENABLED_VIEWPORT;
   }
-  if (object_restrict & OB_RESTRICT_RENDER) {
+  if (object_restrict & OB_HIDE_RENDER) {
     base->flag &= ~BASE_ENABLED_RENDER;
   }
-  if (object_restrict & OB_RESTRICT_SELECT) {
+  if (object_restrict & OB_HIDE_SELECT) {
     base->flag &= ~BASE_SELECTABLE;
   }
 

@@ -646,7 +646,8 @@ static bool gpencil_render_offscreen(tGPDfill *tgpf)
   tgpf->sizey = (int)tgpf->region->winy;
 
   char err_out[256] = "unknown";
-  GPUOffScreen *offscreen = GPU_offscreen_create(tgpf->sizex, tgpf->sizey, true, false, err_out);
+  GPUOffScreen *offscreen = GPU_offscreen_create(
+      tgpf->sizex, tgpf->sizey, true, GPU_RGBA8, err_out);
   if (offscreen == NULL) {
     printf("GPencil - Fill - Unable to create fill buffer\n");
     return false;
@@ -1568,7 +1569,7 @@ static void gpencil_stroke_from_buffer(tGPDfill *tgpf)
   float smoothfac = 1.0f;
   for (int r = 0; r < 1; r++) {
     for (int i = 0; i < gps->totpoints; i++) {
-      BKE_gpencil_stroke_smooth(gps, i, smoothfac - reduce);
+      BKE_gpencil_stroke_smooth_point(gps, i, smoothfac - reduce);
     }
     reduce += 0.25f; /* reduce the factor */
   }

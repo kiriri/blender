@@ -335,6 +335,9 @@ static void gpencil_primitive_set_initdata(bContext *C, tGPDprimitive *tgpi)
   gps->uv_scale = 1.0f;
   gps->inittime = 0.0f;
 
+  /* Set stroke caps. */
+  gps->caps[0] = gps->caps[1] = (short)brush->gpencil_settings->caps_type;
+
   /* Apply the vertex color to fill. */
   ED_gpencil_fill_vertex_color_set(ts, brush, gps);
 
@@ -1379,11 +1382,23 @@ static void gpencil_primitive_interaction_end(bContext *C,
   if (ts->gpencil_flags & GP_TOOL_FLAG_AUTOMERGE_STROKE) {
     if (ELEM(tgpi->type, GP_STROKE_ARC, GP_STROKE_LINE, GP_STROKE_CURVE, GP_STROKE_POLYLINE)) {
       if (gps->prev != NULL) {
+        BKE_gpencil_stroke_boundingbox_calc(gps);
+        float diff_mat[4][4], ctrl1[2], ctrl2[2];
+        BKE_gpencil_layer_transform_matrix_get(tgpi->depsgraph, tgpi->ob, tgpi->gpl, diff_mat);
+        ED_gpencil_stroke_extremes_to2d(&tgpi->gsc, diff_mat, gps, ctrl1, ctrl2);
+
         int pt_index = 0;
         bool doit = true;
         while (doit && gps) {
-          bGPDstroke *gps_target = ED_gpencil_stroke_nearest_to_ends(
-              C, &tgpi->gsc, tgpi->gpl, gpf, gps, GPENCIL_MINIMUM_JOIN_DIST, &pt_index);
+          bGPDstroke *gps_target = ED_gpencil_stroke_nearest_to_ends(C,
+                                                                     &tgpi->gsc,
+                                                                     tgpi->gpl,
+                                                                     gpf,
+                                                                     gps,
+                                                                     ctrl1,
+                                                                     ctrl2,
+                                                                     GPENCIL_MINIMUM_JOIN_DIST,
+                                                                     &pt_index);
           if (gps_target != NULL) {
             gps = ED_gpencil_stroke_join_and_trim(tgpi->gpd, gpf, gps, gps_target, pt_index);
           }
@@ -1827,11 +1842,6 @@ static int gpencil_primitive_modal(bContext *C, wmOperator *op, const wmEvent *e
       else if ((event->val == KM_RELEASE) && (tgpi->flag == IN_MOVE)) {
         tgpi->flag = IN_CURVE_EDIT;
       }
-      else {
-        if (G.debug & G_DEBUG) {
-          printf("GP Add Primitive Modal: LEFTMOUSE %d, Status = %d\n", event->val, tgpi->flag);
-        }
-      }
       break;
     }
     case EVT_SPACEKEY: /* confirm */
@@ -1946,9 +1956,9 @@ static int gpencil_primitive_modal(bContext *C, wmOperator *op, const wmEvent *e
       if (ELEM(tgpi->flag, IN_CURVE_EDIT)) {
         break;
       }
-      /* only handle mousemove if not doing numinput */
+      /* Only handle mouse-move if not doing numeric-input. */
       if (has_numinput == false) {
-        /* update position of mouse */
+        /* Update position of mouse. */
         copy_v2_v2(tgpi->end, tgpi->mval);
         copy_v2_v2(tgpi->start, tgpi->origin);
         if (tgpi->flag == IDLE) {

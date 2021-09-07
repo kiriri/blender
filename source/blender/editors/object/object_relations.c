@@ -570,6 +570,8 @@ void ED_object_parent_clear(Object *ob, const int type)
 
       /* clear parenting relationship completely */
       ob->parent = NULL;
+      ob->partype = PAROBJECT;
+      ob->parsubstr[0] = 0;
       break;
     }
     case CLEAR_PARENT_KEEP_TRANSFORM: {
@@ -2723,24 +2725,53 @@ void OBJECT_OT_make_single_user(wmOperatorType *ot)
 /** \name Drop Named Material on Object Operator
  * \{ */
 
+char *ED_object_ot_drop_named_material_tooltip(bContext *C,
+                                               PointerRNA *properties,
+                                               const wmEvent *event)
+{
+  Object *ob = ED_view3d_give_object_under_cursor(C, event->mval);
+  if (ob == NULL) {
+    return BLI_strdup("");
+  }
+
+  char name[MAX_ID_NAME - 2];
+  RNA_string_get(properties, "name", name);
+
+  int active_mat_slot = max_ii(ob->actcol, 1);
+  Material *prev_mat = BKE_object_material_get(ob, active_mat_slot);
+
+  char *result;
+  if (prev_mat) {
+    const char *tooltip = TIP_("Drop %s on %s (slot %d, replacing %s)");
+    result = BLI_sprintfN(tooltip, name, ob->id.name + 2, active_mat_slot, prev_mat->id.name + 2);
+  }
+  else {
+    const char *tooltip = TIP_("Drop %s on %s (slot %d)");
+    result = BLI_sprintfN(tooltip, name, ob->id.name + 2, active_mat_slot);
+  }
+  return result;
+}
+
 static int drop_named_material_invoke(bContext *C, wmOperator *op, const wmEvent *event)
 {
   Main *bmain = CTX_data_main(C);
-  Base *base = ED_view3d_give_base_under_cursor(C, event->mval);
+  Object *ob = ED_view3d_give_object_under_cursor(C, event->mval);
   Material *ma;
   char name[MAX_ID_NAME - 2];
 
   RNA_string_get(op->ptr, "name", name);
   ma = (Material *)BKE_libblock_find_name(bmain, ID_MA, name);
-  if (base == NULL || ma == NULL) {
+  if (ob == NULL || ma == NULL) {
     return OPERATOR_CANCELLED;
   }
 
-  BKE_object_material_assign(CTX_data_main(C), base->object, ma, 1, BKE_MAT_ASSIGN_USERPREF);
+  const short active_mat_slot = ob->actcol;
 
-  DEG_id_tag_update(&base->object->id, ID_RECALC_TRANSFORM);
+  BKE_object_material_assign(CTX_data_main(C), ob, ma, active_mat_slot, BKE_MAT_ASSIGN_USERPREF);
 
-  WM_event_add_notifier(C, NC_OBJECT | ND_OB_SHADING, base->object);
+  DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM);
+
+  WM_event_add_notifier(C, NC_OBJECT | ND_OB_SHADING, ob);
   WM_event_add_notifier(C, NC_SPACE | ND_SPACE_VIEW3D, NULL);
   WM_event_add_notifier(C, NC_MATERIAL | ND_SHADING_LINKS, ma);
 

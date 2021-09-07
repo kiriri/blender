@@ -873,13 +873,6 @@ void blo_do_versions_userdef(UserDef *userdef)
     }
   }
 
-  if (!USER_VERSION_ATLEAST(293, 2)) {
-    /* Enable asset browser features by default for alpha testing.
-     * BLO_sanitize_experimental_features_userpref_blend() will disable it again for non-alpha
-     * builds. */
-    userdef->experimental.use_asset_browser = true;
-  }
-
   if (!USER_VERSION_ATLEAST(293, 12)) {
     if (userdef->gizmo_size_navigate_v3d == 0) {
       userdef->gizmo_size_navigate_v3d = 80;
@@ -890,6 +883,14 @@ void blo_do_versions_userdef(UserDef *userdef)
 
   if (!USER_VERSION_ATLEAST(293, 13)) {
     BKE_addon_ensure(&userdef->addons, "pose_library");
+  }
+
+  if (!USER_VERSION_ATLEAST(300, 21)) {
+    /* Deprecated userdef->flag USER_SAVE_PREVIEWS */
+    userdef->file_preview_type = (userdef->flag & USER_FLAG_UNUSED_5) ? USER_FILE_PREVIEW_CAMERA :
+                                                                        USER_FILE_PREVIEW_NONE;
+    /* Clear for reuse. */
+    userdef->flag &= ~USER_FLAG_UNUSED_5;
   }
 
   /**
