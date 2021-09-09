@@ -14,12 +14,31 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
+#include "BKE_spline.hh"
 #include "UI_interface.h"
 #include "UI_resources.h"
-#include "BKE_spline.hh"
 #include "node_geometry_util.hh"
 #include <iostream>
 #include <list>
+
+/**
+ * This file implements the Curve 2D Boolean geometry node.
+ *
+ * Missing Features:
+ * Per segment curve attributes. Like resolution.
+ * Geometry Nodes on Curve object or Apply as Curve Operation
+ *
+ * TODO:
+ * If either of the curves self intersect, show a warning. Find out if they intersect, by checking if at any point, the cumulative angle change is > 360
+ *
+ * BUG:
+ * Auto handles mess shit up. Must convert all handles to free before doing anything else.
+ * Multiple intersections in one line segment not working.
+ * Any operation creating more than 1 curve does not work
+ * - Union with multiple curves or without an intersection
+ * - Difference where B splits A into n segments.
+ * - Intersection with multiple curves or multiple intersections
+ */
 
 static bNodeSocketTemplate geo_node_curve_bool_in[] = {
     {SOCK_GEOMETRY, N_("Curve B")},
@@ -42,6 +61,32 @@ static void geo_node_curve_bool_layout(uiLayout *layout, bContext *UNUSED(C), Po
 namespace blender::nodes
 {
 
+void print_a(std::list<blender::float2> const &list)
+{
+  for (auto const &i : list)
+  {
+    std::cout << i << std::endl << std::flush;
+  }
+}
+
+void print(std::string s)
+{
+  std::cout << s << std::endl << std::flush;
+}
+
+static bool curve_contains(Spline *spline, blender::float3 point)
+{
+  blender::Span<blender::float3> points = spline->evaluated_positions();
+  int points_length = points.size();
+  int i, j, c = 0;
+  for (i = 0, j = points_length - 1; i < points_length; j = i++)
+  {
+    if (((points[i][1] > point[1]) != (points[j][1] > point[1])) && (point[0] < (points[j][0] - points[i][0]) * (point[1] - points[i][1]) / (points[j][1] - points[i][1]) + points[i][0]))
+      c = !c;
+  }
+  return c;  // if even, point is outside ( return false )
+}
+
 // Step 1 :
 // Find function that finds intersections
 // Iterate shape A points, find intersections for each segment, add them as another point, then
@@ -53,10 +98,7 @@ namespace blender::nodes
  * Coordinates are ignored. If either of the 2 floats returned is negative, no collision occured.
  * If they are not negative, they are in [0,1]
  */
-static blender::float2 linesIntersect(blender::float3 A,
-                                      blender::float3 B,
-                                      blender::float3 C,
-                                      blender::float3 D)
+static blender::float2 linesIntersect(blender::float3 A, blender::float3 B, blender::float3 C, blender::float3 D)
 {
   float CmA_x = C.x - A.x;
   float CmA_y = C.y - A.y;
@@ -84,8 +126,7 @@ static blender::float2 linesIntersect(blender::float3 A,
 
   bool result = (t >= 0.f) && (t <= 1.f) && (u >= 0.f) && (u <= 1.f);
   if (result)
-    std::cout << t << " " << u << std::endl
-              << std::flush;  // intersection at t on curve A and u on curve B
+    std::cout << t << " " << u << std::endl << std::flush;  // intersection at t on curve A and u on curve B
   else
     return blender::float2(-1, -1);
 
@@ -97,164 +138,177 @@ static blender::float2 linesIntersect(blender::float3 A,
  * If either of the 2 floats returned is negative, no collision occured. If they are not negative,
  * they are in [0,1]
  */
-static blender::float2 bezierIntersect(blender::Span<blender::float3> points_a,
-                                       blender::Span<blender::float3> points_b,
-                                       int start_a = 0,
-                                       bool ignore_zero = false)
+static blender::float2 bezierIntersect(blender::Span<blender::float3> points_a, blender::Span<blender::float3> points_b, int start_a = 0, bool ignore_zero = false)
 {
   for (int i_a = start_a; i_a < points_a.size() - 1; i_a++)
   {
     for (int i_b = 0; i_b < points_b.size() - 1; i_b++)
     {
-      blender::float2 intersection = linesIntersect(
-          points_a[i_a], points_a[i_a + 1], points_b[i_b], points_b[i_b + 1]);
-      if (ignore_zero ? i_a != start_a && (intersection[0] > (0.001) && intersection[1] > 0.001) :
-                        intersection[0] >= 0)
+      blender::float2 intersection = linesIntersect(points_a[i_a], points_a[i_a + 1], points_b[i_b], points_b[i_b + 1]);
+      if (ignore_zero ? i_a != start_a && (intersection[0] > (0.001) && intersection[1] > 0.001) : intersection[0] >= 0)
       {
-        std::cout << "Int " << intersection[0] << " < "
-                  << (0.001 + start_a / (float)points_a.size()) << std::endl
-                  << std::flush;
+        std::cout << "Int " << intersection[0] << " < " << (0.001 + start_a / (float)points_a.size()) << std::endl << std::flush;
         ;
         intersection[0] = (intersection[0] + i_a) / (points_a.size() - 1);
         intersection[1] = (intersection[1] + i_b) / (points_b.size() - 1);
         return intersection;
       }
 
-      if (ignore_zero && ((intersection[0] >= 0) ||
-                          (intersection[1] >= 0) &&
-                              (intersection[0] <= (0.0001 + start_a / (float)points_a.size()) ||
-                               intersection[1] <= 0.0001)))
+      if (ignore_zero && ((intersection[0] >= 0) || (intersection[1] >= 0) && (intersection[0] <= (0.0001 + start_a / (float)points_a.size()) || intersection[1] <= 0.0001)))
         std::cout << "Ignored Duplicate " << intersection[0] << std::endl << std::flush;
     }
   }
   return blender::float2(-1, -1);
 }
 
+static int _bezierIntesectSpecific(blender::float3 point_a, blender::float3 point_a_next, blender::float3 point_b, blender::float3 point_b_next, int i_a, int i_b, int a_size, int b_size,blender::float2 &earliest_intersection, int &earliest_segment_i_b)
+{
+  blender::float2 intersection = linesIntersect(point_a, point_a_next, point_b, point_b_next);
+
+  if (intersection[0] >= 0)
+  {
+    intersection[0] = (intersection[0] + i_a) / a_size;
+    intersection[1] = (intersection[1] + i_b) / b_size;
+
+    if (intersection[0] < earliest_intersection[0])
+    {
+      earliest_intersection = intersection;
+      earliest_segment_i_b = i_b;
+    }
+  }
+
+  return 0;
+}
 
 /**
  * Find the intersections between 2 2d bezier curves. Z Coordinates are ignored.
- * After each intersection, switch to scan along the other curve from the intersection point onwards,
- * zigzagging along until the end of either curve is reached.
- * Results are in [0,1] and represent the intersection point along the curve. Keep in mind that at uneven indices, the first and second curve are flipped, and so are the results.
+ * After each intersection, switch to scan along the other curve from the intersection point
+ * onwards, zigzagging along until the end of either curve is reached. Results are in [0,1] and
+ * represent the intersection point along the curve. Keep in mind that at uneven indices, the first
+ * and second curve are flipped, and so are the results.
  */
-static std::list<blender::float2> bezierIntersectAll(blender::Span<blender::float3> points_a,
-                                       blender::Span<blender::float3> points_b)
+static std::list<blender::float2> bezierIntersectAll(blender::Span<blender::float3> points_a, blender::Span<blender::float3> points_b, bool cycle_a = false, bool cycle_b = false)
 {
   std::list<blender::float2> results;
 
+  int size_a = points_a.size();
+  int size_b = points_b.size();
+
+  if (size_a <= 0 || size_b <= 0)
+    return results;
+
+  // cycle_a = cycle_b = 0;
+
   int loop_terminator = 0;
 
-  float a_line_offset = 0; // Whenever an intersection occurs, points_a and points_b get swapped. Remember how far along the line segment the intersection occured to avoid repeating it right after.
+  float a_line_offset = 0;  // Whenever an intersection occurs, points_a and points_b get swapped. Remember how far
+                            // along the line segment the intersection occured to avoid repeating it right after.
 
   // TODO : How to terminate? Reach same point (by index)
-  bool* passed_a = new bool[points_a.size()]{false};
-  bool* passed_b = new bool[points_b.size()]{false};
+  bool *passed_a = new bool[size_a]{false};
+  bool *passed_b = new bool[size_b]{false};
 
-  for (int i_a = 0; true ; i_a++  )
+  // TODO : Return multiple paths. All intersection points must be used.
+
+  float start_b = 0; // Because curves must not self intersect, both curves have all their intersection points in order (for each connected part, not in general)
+  float end_b = 1;   // That means we can limit our search to the segments between the last intersection and the first one.
+
+  for (int i_a = 0; true;)
   {
-    if((i_a + 1) >= points_a.size())
-      i_a = 0;
+    int i_a_next = (i_a + 1) % size_a;
+
     loop_terminator++;
-    if(loop_terminator > 1000)
+    if (loop_terminator > 100000)
+    {
+      print("Emergency Break. Too many loop iterations");
       break;
-    if(passed_a[i_a]) // Already processed this point -> Did a full loop.
+    }
+    if (passed_a[i_a])  // Already processed this point -> Did a full loop.
       return results;
     passed_a[i_a] = true;
 
-    blender::float2 earliest_intersection = blender::float2(2.0,0);
+    blender::float2 earliest_intersection = blender::float2(2.0, 0);
     int earliest_segment_i_b = 0;
 
-    for (int i_b = 0; i_b < points_b.size() - 1; i_b++)
+    // TODO : Start looking from the last intersection on. Pick the first intersection you can find. No need to check the rest because we forbid self overlap
+    for (int i_b = start_b * (size_b - 1); i_b < end_b * size_b - 1; i_b++)
     {
-      blender::float2 intersection = linesIntersect(
-          a_line_offset * points_a[i_a + 1] + (1 - a_line_offset) * points_a[i_a], points_a[i_a + 1], points_b[i_b], points_b[i_b + 1]);
-
-      if(intersection[0] >= 0)
-      {
-        intersection[0] = (intersection[0] + a_line_offset + i_a) / (points_a.size() );
-        intersection[1] = (intersection[1] + i_b) / (points_b.size() );
-
-
-
-        if(intersection[0] <  earliest_intersection[0])
-        {
-          earliest_intersection = intersection;
-          earliest_segment_i_b = i_b;
-        }
-      }
+      _bezierIntesectSpecific(points_a[i_a], points_a[i_a_next], points_b[i_b], points_b[i_b + 1], i_a, i_b, size_a, size_b, earliest_intersection, earliest_segment_i_b);
     }
-    if (earliest_intersection[0] <= 1.0)
+
+    if (cycle_b)  // Connect last point to first
+    {
+      _bezierIntesectSpecific(points_a[i_a], points_a[i_a_next], points_b[size_b - 1], points_b[0], i_a, size_b - 1, size_a, size_b, earliest_intersection, earliest_segment_i_b);
+    }
+
+    if ( ( earliest_intersection[0] > a_line_offset ) && earliest_intersection[0] <= 1.0)//
     {
 
       results.push_back(earliest_intersection);
 
       // TODO : a_line_offset and passed_a[i_a] = false
 
-      i_a = earliest_intersection[1] * points_b.size();
-      std::cout << "I_A " << i_a << std::endl << std::flush;
-      std::swap(points_a,points_b);
-      std::swap(passed_b,passed_a);
-      // passed_a[i_a] = false; // make sure looping back into the middle of a line segment does not cause a loop if we originally came from that line segment
+      i_a_next = mod_i(earliest_intersection[1] * size_b + 1, size_b);
+      std::cout << "I_A " << i_a_next << std::endl << std::flush;
+      std::swap(points_a, points_b);
+      std::swap(passed_b, passed_a);
+      std::swap(size_a, size_b);
+      a_line_offset = earliest_intersection[1];
+
+      // TODO : What to do ? If multiple intersections were detected, do what exactly?
+      // Can we ever go back on either of the two lines? Otherwise store earliest intersection, and stop once either of the 2 has exceeded it.
+      // Then do over at remaining, untraced intersection points?
+
+      // passed_a[i_a] = false; // make sure looping back into the middle of a line segment does
+      // not cause a loop if we originally came from that line segment
     }
+    else
+      a_line_offset = 0;
+
+    if (!cycle_a)
+    {
+      if (i_a_next == size_a - 1)
+        break;
+    }
+
+    i_a = i_a_next;
   }
   return results;
 }
-
-
-
-void print_a(std::list<blender::float2> const &list)
-{
-    for (auto const &i: list) {
-        std::cout << i << std::endl << std::flush;
-    }
-}
-
-
-void print(std::string s)
-{
-	std::cout << s << std::endl << std::flush;
-}
-
-static bool curve_contains(Spline* spline, blender::float3 point)
-{
-  blender::Span<blender::float3> points = spline->evaluated_positions();
-  int points_length = points.size();
-  int i, j, c = 0;
-  for (i = 0, j = points_length-1; i < points_length; j = i++) {
-    if ( ((points[i][1]>point[1]) != (points[j][1]>point[1])) &&
-     (point[0] < (points[j][0]-points[i][0]) * (point[1]-points[i][1]) / (points[j][1]-points[i][1]) + points[i][0]) )
-       c = !c;
-  }
-  return c; // if even, point is outside ( return false )
-}
-
-
-
 
 /**
  * Copy the segments from one curve to the end of another
  * Do until, but not including, target segment id.
  * Loop if cyclic.
  */
-static int copy_segments(int end_a, int current_source_segment, BezierSpline* target_spline, BezierSpline* source_spline, int source_segment_count, int source_control_point_count, int offset = 1)
+static int copy_segments(int end_a, int current_source_segment, BezierSpline *target_spline, BezierSpline *source_spline, int source_segment_count, int source_control_point_count, int offset = 1)
 {
-  print("COPYING SEGMENTS FROM " + std::to_string(current_source_segment) + " TO " + std::to_string(end_a) );
+  print("COPYING SEGMENTS FROM " + std::to_string(current_source_segment) + " TO " + std::to_string(end_a));
   int result = 0;
-  for(; (current_source_segment != end_a ); current_source_segment = mod_i(current_source_segment + 1, source_segment_count) )
+  for (; (current_source_segment != end_a); current_source_segment = mod_i(current_source_segment + 1, source_segment_count))
   {
     int next_control_point = mod_i(current_source_segment + offset, source_control_point_count);
 
     print("NEXT SEGMENT2 " + std::to_string(next_control_point));
-    target_spline->add_point( source_spline->positions()[next_control_point ],
-                              BezierSpline::HandleType::Free,
-                              source_spline->handle_positions_left()[next_control_point ],
-                              BezierSpline::HandleType::Free,
-                              source_spline->handle_positions_right()[next_control_point ],
-                              1.0f,
-                              0.0f);
+    target_spline->add_point(source_spline->positions()[next_control_point], BezierSpline::HandleType::Free, source_spline->handle_positions_left()[next_control_point], BezierSpline::HandleType::Free, source_spline->handle_positions_right()[next_control_point], 1.0f, 0.0f);
 
     result++;
+  }
 
+  return result;
+}
+
+static int _copy_segments(int start, int count, BezierSpline *target_spline, BezierSpline *source_spline, int source_control_point_count)
+{
+  int result = 0;
+  int end = (start + count) % source_control_point_count;
+  for (int i = 0; i < count; i++)
+  {
+    int pos = mod_i(start + i, source_control_point_count);
+    print("NEXT SEGMENT2 " + std::to_string(pos));
+    target_spline->add_point(source_spline->positions()[pos], BezierSpline::HandleType::Free, source_spline->handle_positions_left()[pos], BezierSpline::HandleType::Free, source_spline->handle_positions_right()[pos], 1.0f, 0.0f);
+
+    result++;
   }
 
   return result;
@@ -265,7 +319,7 @@ static int copy_segments(int end_a, int current_source_segment, BezierSpline* ta
  * Generates additional points along the result spline.
  *
  */
-static int process_intersection(bool first, blender::float2 intersection, BezierSpline* result_spline, BezierSpline* spline_a,BezierSpline* spline_b, blender::float2 &last_intersection_offset, int last_a_segment)
+static int process_intersection(bool first, bool last, blender::float2 intersection, BezierSpline *result_spline, BezierSpline *spline_a, BezierSpline *spline_b, blender::float2 &last_intersection_offset, int last_a_segment)
 {
   bool is_cyclic_a = spline_a->is_cyclic();
   bool is_cyclic_b = spline_b->is_cyclic();
@@ -284,106 +338,107 @@ static int process_intersection(bool first, blender::float2 intersection, Bezier
   int a_segment = (int)a_control_point_v;
   int b_segment = (int)b_control_point_v;
 
-
-
   int _next_segment_a = mod_i(a_segment + 1, segment_count_a);
 
+  float intersection_offset_a = fmod(a_control_point_v, 1.0f);
+  float intersection_offset_b = fmod(b_control_point_v, 1.0f);
 
-  float intersection_offset_a = fmod(a_control_point_v,1.0f);
-  float intersection_offset_b = fmod(b_control_point_v,1.0f);
-
-
-  bool force_point = (last_intersection_offset[0] >= intersection_offset_a) && (last_a_segment == _next_segment_a); // if next intersection occurs in same segment, but earlier, do a full loop
+  bool force_point = (last_intersection_offset[0] >= intersection_offset_a) && (last_a_segment == _next_segment_a);  // if next intersection occurs in same
+                                                                                                                     // segment, but earlier, do a full loop
 
   print("LAST " + std::to_string(last_intersection_offset[0]) + " NEXT " + std::to_string(intersection_offset_a));
 
-
   // add all control points that did not have any intersections in their segments
-  for(; (last_a_segment != _next_segment_a) || force_point; last_a_segment = mod_i(last_a_segment + 1, segment_count_a) )
+  for (; (last_a_segment != _next_segment_a) || force_point; last_a_segment = mod_i(last_a_segment + 1, segment_count_a))
   {
     force_point = false;
     int next_control_point = mod_i(last_a_segment + 1, control_point_count_a);
 
     print("NEXT SEGMENT " + std::to_string(last_a_segment));
-    result_spline->add_point(spline_a->positions()[next_control_point ],
-                          BezierSpline::HandleType::Free,
-                          spline_a->handle_positions_left()[next_control_point ],
-                          BezierSpline::HandleType::Free,
-                          spline_a->handle_positions_right()[next_control_point ],
-                          1.0f,
-                          0.0f);
+    result_spline->add_point(spline_a->positions()[next_control_point], BezierSpline::HandleType::Free, spline_a->handle_positions_left()[next_control_point], BezierSpline::HandleType::Free, spline_a->handle_positions_right()[next_control_point], 1.0f, 0.0f);
     print("NEW SEGMENT " + std::to_string(last_a_segment));
-    //"NEW SEGMENT " << last_a_control_pointstd::cout << "NEW SEGMENT " << last_a_control_point << std::endl << std::flush;
+    //"NEW SEGMENT " << last_a_control_pointstd::cout << "NEW SEGMENT " << last_a_control_point <<
+    // std::endl << std::flush;
     last_intersection_offset[0] = 0;
-
   }
 
-
-/// Now add the next intersection
-  int result_segment = result_spline->positions().size() - 2; // calculate the control index along the result
-  float result_v = (intersection_offset_a - last_intersection_offset[0]) / (1-last_intersection_offset[0]); // calculate the coordinate along the result (keep in mind the result curve can contain additional "collision" control points)
+  /// Now add the next intersection
+  int result_segment = result_spline->positions().size() - 2;                                                  // calculate the control index along the result
+  float result_v = (intersection_offset_a - last_intersection_offset[0]) / (1 - last_intersection_offset[0]);  // calculate the coordinate along the result
+                                                                                                               // (keep in mind the result curve can contain
+                                                                                                               // additional "collision" control points)
 
   std::cout << "GOING IN WITH  " << result_segment << std::endl << std::flush;
 
-  int next_control_point_b = mod_i(b_segment + 1,control_point_count_b);
+  int next_control_point_b = mod_i(b_segment + 1, control_point_count_b);
 
-  BezierSpline::InsertResult insert_a = first ? spline_a->calculate_segment_insertion(a_segment , a_segment + 1, intersection_offset_a) : result_spline->calculate_segment_insertion(result_segment , result_segment + 1, result_v);
-  BezierSpline::InsertResult insert_b = spline_b->calculate_segment_insertion(
-      b_segment , next_control_point_b , fmod(b_control_point_v,1.0f));
+  BezierSpline::InsertResult insert_a = first ? spline_a->calculate_segment_insertion(a_segment, a_segment + 1, intersection_offset_a) : result_spline->calculate_segment_insertion(result_segment, result_segment + 1, result_v);
+  BezierSpline::InsertResult insert_b = spline_b->calculate_segment_insertion(b_segment, next_control_point_b, fmod(b_control_point_v, 1.0f));
 
-  std::cout << "B Intersection at : " << intersection[1] << " " << intersection_offset_a << ":" << last_intersection_offset[0] << " >> " << result_v << std::endl <<  std::flush;
+  std::cout << "B Intersection at : " << intersection[1] << " " << intersection_offset_a << ":" << last_intersection_offset[0] << " >> " << result_v << std::endl << std::flush;
 
-  std::cout << "A Intersection at : " << intersection[0] << "/" << intersection[1] << " " << intersection_offset_a << ":" << last_intersection_offset[0] << " >> " << result_v << std::endl <<  std::flush;
+  std::cout << "A Intersection at : " << intersection[0] << "/" << intersection[1] << " " << intersection_offset_a << ":" << last_intersection_offset[0] << " >> " << result_v << std::endl << std::flush;
 
   last_intersection_offset[0] = intersection_offset_a;
   last_intersection_offset[1] = intersection_offset_b;
 
-  if(first) // if we're only starting at first intersection.
-  {
-    result_spline->handle_positions_left()[result_spline->positions().size() - 1] =
-      insert_a.left_handle;
-    result_spline->positions()[result_spline->positions().size() - 1] = insert_b.position;
-    result_spline->handle_positions_right()[result_spline->positions().size() - 1] =
-        insert_b.right_handle;
+  if (!first)  // if we're only starting at first intersection.
+    result_spline->handle_positions_right()[result_spline->positions().size() - 2] = insert_a.handle_prev;
 
-  }
-  else
-  {
-    result_spline->handle_positions_right()[result_spline->positions().size() - 2] =
-          insert_a.handle_prev;
-    result_spline->handle_positions_left()[result_spline->positions().size() - 1] =
-        insert_a.left_handle;
-    result_spline->positions()[result_spline->positions().size() - 1] = insert_b.position;
-    result_spline->handle_positions_right()[result_spline->positions().size() - 1] =
-        insert_b.right_handle;
-  }
+  result_spline->handle_positions_left()[result_spline->positions().size() - 1] = insert_a.left_handle;
+  result_spline->positions()[result_spline->positions().size() - 1] = insert_b.position;
+  result_spline->handle_positions_right()[result_spline->positions().size() - 1] = insert_b.right_handle;
 
-
-
-  result_spline->add_point(spline_b->positions()[next_control_point_b],
-                          BezierSpline::HandleType::Free,
-                          insert_b.handle_next,
-                          BezierSpline::HandleType::Free,
-                          spline_b->handle_positions_right()[next_control_point_b],
-                          1.0f,
-                          0.0f);
-
-
+  // if(!last)
+  // {
+  result_spline->add_point(spline_b->positions()[next_control_point_b], BezierSpline::HandleType::Free, insert_b.handle_next, BezierSpline::HandleType::Free, spline_b->handle_positions_right()[next_control_point_b], 1.0f, 0.0f);
+  last_a_segment = mod_i(b_segment + 1,
+                         segment_count_b);  // assign next point to from b to a knowing they are now switched
+  // }
+  // else
+  // {
+  //   last_a_segment = b_segment; // assign next point to from b to a knowing they are now
+  //   switched
+  // }
 
   print("Set control point to ");
   print(std::to_string(b_segment));
 
-  last_a_segment = mod_i(b_segment+1  , segment_count_b); // assign next point to from b to a knowing they are now switched
-
   return last_a_segment;
 }
 
+/**
+ * Switch the direction of the spline.
+ * TODO : Switch tilt and radius and whatever else gets changed when spline->resize() is called.
+ */
+static int switch_direction(BezierSpline *spline)
+{
+  auto points = spline->positions();
+  auto handles_l = spline->handle_positions_left();
+  auto handles_r = spline->handle_positions_right();
 
+  int length = points.size();
 
+  for (int i = 0; i < length / 2.0f; i++)
+  {
+    std::swap(points[i], points[length - i - 1]);
+    std::swap(handles_l[i], handles_r[length - i - 1]);
+    std::swap(handles_r[i], handles_l[length - i - 1]);
+  }
 
-typedef enum BoolDomainType {
+  spline->mark_cache_invalid();
+
+  return 0;
+}
+
+/**
+ * Same ids as "curve_bool_items" in NOD_static_types.h
+ */
+typedef enum BoolDomainType
+{
   OR = 0,
   AND = 1,
+  SUB = 2,
 } BoolDomainType;
 
 /**
@@ -401,8 +456,7 @@ static std::unique_ptr<CurveEval> intersect(const CurveEval *a, const CurveEval 
   result_spline->set_resolution(resolution);
 
   const char *types[] = {"Bezier", "NURBS", "Poly"};
-  Span<SplinePtr> splines_a =
-      a->splines();  // each CurveEval object can contain several unconnected curves.
+  Span<SplinePtr> splines_a = a->splines();  // each CurveEval object can contain several unconnected curves.
   Span<SplinePtr> splines_b = b->splines();
 
   std::cout << "Wargh" << std::endl << std::flush;
@@ -428,69 +482,126 @@ static std::unique_ptr<CurveEval> intersect(const CurveEval *a, const CurveEval 
 
       BezierSpline *spline_b = (BezierSpline *)_spline_b.get();
 
-      /// FIRST, FIND ALL INTERSECTIONS.
-      std::list<blender::float2> path = bezierIntersectAll(spline_a->evaluated_positions(),spline_b->evaluated_positions());
-
-
-      if(path.size() == 0 ) // No Intersections or uneven intersections (TODO : Reenable uneven intersections)
+      if (((type == BoolDomainType::AND)))
       {
-        if(type == BoolDomainType::AND)
-        {
-          // If one curve is fully inside the other, use the smaller one. Otherwise return empty curve.
-          std::cout << curve_contains(spline_a,spline_b->positions()[0]) << curve_contains(spline_b,spline_a->positions()[0]) << std::endl <<  std::flush;
-          if(spline_a->size() > 0 && spline_b->size() > 0)
-          {
-            if(curve_contains(spline_a,spline_b->positions()[0]))
-            {
-              std::cout << "B in A" << std::endl <<  std::flush;
-              auto c = *(BezierSpline*)(spline_b->copy().get());
-              result_spline = std::make_unique<BezierSpline>(c);
-            }
-            else if(curve_contains(spline_b,spline_a->positions()[0]))
-            {
-              std::cout << "A in B" << std::endl <<  std::flush;
-              auto c = *(BezierSpline*)(spline_a->copy().get());
-              result_spline = std::make_unique<BezierSpline>(c);
-            }
-          }
-        }
-        else if (type == BoolDomainType::OR) // TODO : If one inside the other, use bigger one. Otherwise return both as separate Curves inside the same CurveEval
-        {
-          if(spline_a->size() > 0 && spline_b->size() > 0)
-          {
-            if(curve_contains(spline_a,spline_b->positions()[0]))
-            {
-              std::cout << "B in A" << std::endl <<  std::flush;
-              auto c = *(BezierSpline*)(spline_a->copy().get());
-              result_spline = std::make_unique<BezierSpline>(c);
-            }
-            else if(curve_contains(spline_b,spline_a->positions()[0]))
-            {
-              std::cout << "A in B" << std::endl <<  std::flush;
+        print("DIRSWITCH");
+        switch_direction(spline_a);
+        switch_direction(spline_b);
+      }
 
-              auto c = *(BezierSpline*)(spline_b->copy().get());
+      if (((type == BoolDomainType::SUB)))
+      {
+        print("DIRSWITCH");
+        switch_direction(spline_b);
+      }
+
+      bool is_cyclic_a = spline_a->is_cyclic();
+      bool is_cyclic_b = spline_b->is_cyclic();
+      /// FIRST, FIND ALL INTERSECTIONS.
+      std::list<blender::float2> path = bezierIntersectAll(spline_a->evaluated_positions(), spline_b->evaluated_positions(), is_cyclic_a, is_cyclic_b);
+
+      print("Finished intersections");
+
+      if (path.size() == 0)  // No Intersections.
+      {
+        if (type == BoolDomainType::AND)
+        {
+          // If one curve is fully inside the other, use the smaller one. Otherwise return empty
+          // curve.
+          if (spline_a->size() > 0 && spline_b->size() > 0)
+          {
+            if (curve_contains(spline_a, spline_b->positions()[0]))
+            {
+              auto c = *(BezierSpline *)(spline_b->copy().get());
+              result_spline = std::make_unique<BezierSpline>(c);
+            }
+            else if (curve_contains(spline_b, spline_a->positions()[0]))
+            {
+              auto c = *(BezierSpline *)(spline_a->copy().get());
               result_spline = std::make_unique<BezierSpline>(c);
             }
           }
         }
+        else if (type == BoolDomainType::OR)  // If one inside the other, use bigger one. Otherwise return
+                                              // both as separate Curves inside the same CurveEval
+        {
+          if (spline_a->size() > 0 && spline_b->size() > 0)
+          {
+            if (curve_contains(spline_a, spline_b->positions()[0]))
+            {
+              auto c = *(BezierSpline *)(spline_a->copy().get());
+              result_spline = std::make_unique<BezierSpline>(c);
+            }
+            else if (curve_contains(spline_b, spline_a->positions()[0]))
+            {
+              auto c = *(BezierSpline *)(spline_b->copy().get());
+              result_spline = std::make_unique<BezierSpline>(c);
+            }
+            else
+            {
+              auto c = *(BezierSpline *)(spline_b->copy().get());
+              result_spline = std::make_unique<BezierSpline>(c);
+            }
+          }
+        }
+        else if (type == BoolDomainType::SUB)
+        {
+          if (curve_contains(spline_a, spline_b->positions()[0]))
+          {
+            auto c = *(BezierSpline *)(spline_a->copy().get());
+            result_spline = std::make_unique<BezierSpline>(c);
+            auto d = *(BezierSpline *)(spline_b->copy().get());
+            result->add_spline(std::move(std::make_unique<BezierSpline>(d)));
+          }
+        }
+        print("Finished SPECIAL");
         break;
       }
 
-      std::cout << "Intersections are : " << std::endl <<  std::flush;
+      std::cout << "Intersections are : " << std::endl << std::flush;
       print_a(path);
 
-      // Look at first intersection. If AND, follow outwards, if OR, follow inwards. If OR, ignore all control points that lie inside B ( anything up to the first intersection point )
-      bool contains_start = curve_contains(spline_b,spline_a->positions()[0]);
+      // Look at first intersection. If AND, follow outwards, if OR, follow inwards.
+      // Ignore all control points up to the first intersection, because they may lie inside for OR
+      // or outside for AND the other shape.
 
-      if( (contains_start && (type == BoolDomainType::OR)) || (!contains_start && (type == BoolDomainType::AND)) )
+      bool contains_start = spline_a->size() > 0 ? curve_contains(spline_b, spline_a->positions()[0]) : false;
+
+      std::cout << "Start is inside : " << contains_start << std::endl << std::flush;
+
+      if ((contains_start && (type == BoolDomainType::OR || type == BoolDomainType::SUB)) || (!contains_start && (type == BoolDomainType::AND)))  //
       {
-        std::cout << "SWAP " << std::endl <<  std::flush;
+        std::cout << "SWAP " << std::endl << std::flush;
         std::swap(spline_a, spline_b);
         for (blender::float2 &intersection : path)
         {
           std::swap(intersection[0], intersection[1]);
         }
       }
+
+      // if(!contains_start && (type == BoolDomainType::AND))
+      // {
+      //   // TODO : Start at first intersection, but don't switch. (But isn't this just a swapped
+      //   spline?)
+      //   // TODO : Does this require a different
+
+      //   std::cout << "SWAP " << std::endl <<  std::flush;
+      //   std::swap(spline_a, spline_b);
+      //   blender::float2 prev;
+      //   for (blender::float2 &intersection : path)
+      //   {
+      //     std::swap(intersection[0], intersection[1]);
+      //     // blender::float2 temp = intersection;
+      //     // intersection[0] = prev[0];
+      //     // intersection[1] = prev[1];
+      //     // prev = temp;
+      //   }
+      //   // if(path.size() > 0)
+      //   // {
+      //   //   path.front()[0] = prev[0];
+      //   //   path.front()[1] = prev[1];
+      //   // }
+      // }
 
       // result_spline->add_point( spline_a->positions()[0 ],
       //                           BezierSpline::HandleType::Free,
@@ -500,9 +611,6 @@ static std::unique_ptr<CurveEval> intersect(const CurveEval *a, const CurveEval 
       //                           1.0f,
       //                           0.0f);
 
-
-
-      bool is_cyclic_a = spline_a->is_cyclic();
       int control_point_count_a = spline_a->positions().size();
       int segment_count_a = control_point_count_a + (is_cyclic_a ? 0 : -1);
 
@@ -511,98 +619,124 @@ static std::unique_ptr<CurveEval> intersect(const CurveEval *a, const CurveEval 
       float a_control_point_v = intersection[0] * segment_count_a;
       int a_segment = (int)a_control_point_v;
       int _next_segment_a = mod_i(a_segment + 1, segment_count_a);
-      float intersection_offset_a = fmod(a_control_point_v,1.0f);
+      float intersection_offset_a = fmod(a_control_point_v, 1.0f);
 
       int start_a = a_segment;
       float start_a_offset = intersection_offset_a;
       int last_a_segment = start_a;
 
-
-      blender::float2 last_intersection_offset = blender::float2(0,0); // offset along the curve from the last control point to the next. Used to translate between result and A/B coordinate
+      blender::float2 last_intersection_offset = blender::float2(0, 0);  // offset along the curve from the last control point to the next. Used to
+                                                                         // translate between result and A/B coordinate
 
       print("+++++++++++++++++++++++++++++");
 
-
       bool first = true;
+      bool last = true;
       for (const blender::float2 &intersection : path)
       {
-        last_a_segment = process_intersection(first,intersection,result_spline.get(),spline_a,spline_b,last_intersection_offset,last_a_segment);
+        last = intersection == path.back();
+        last_a_segment = process_intersection(first, last, intersection, result_spline.get(), spline_a, spline_b, last_intersection_offset, last_a_segment);
         first = false;
 
         std::swap(spline_a, spline_b);
         std::swap(last_intersection_offset[0], last_intersection_offset[1]);
       }
 
+      // start_a = mod_i(start_a + 1, segment_count_a);
+      //
 
+      // if(true) //start_a == last_a_segment
+      // {
+      //   // either a full 360 is required, or the last point must be removed.
 
-      //start_a = mod_i(start_a + 1, segment_count_a);
-      copy_segments(start_a, last_a_segment, result_spline.get(), spline_a, segment_count_a, control_point_count_a);
-      //start_a = mod_i(start_a + 1, segment_count_a);
-      BezierSpline::InsertResult insert_a = spline_a->calculate_segment_insertion(start_a ,  mod_i(start_a  + 1, spline_a->positions().size()), intersection_offset_a);
+      //   result_spline->resize(result_spline->size()-1);
+      //   //result_spline->positions_.remove_last();
+      //   // result_spline->handle_positions_left() =
+      //   result_spline->handle_positions_left().drop_back(1);
+      //   // result_spline->handle_positions_right() =
+      //   result_spline->handle_positions_right().drop_back(1);
+      //   result_spline->mark_cache_invalid();
+      // }
 
-      result_spline->handle_positions_right()[result_spline->size()-1] = insert_a.handle_prev;
-      result_spline->handle_positions_left()[0] = insert_a.left_handle;
+      // TODO : Complete all remaining segments
+      BezierSpline::InsertResult insert_a;
+
+      print(std::to_string(start_a) + " vs " + std::to_string(last_a_segment));
+
+      // If last segment is same as starting segment, then we need to use the result instead of
+      // spline_a to calculate the handle sizes,
+      if (last_a_segment == mod_i(start_a + 1, segment_count_a))  //
+      {
+        if (last_intersection_offset[0] > start_a_offset)
+        {
+          _copy_segments(last_a_segment, segment_count_a, result_spline.get(), spline_a, control_point_count_a);
+
+          insert_a = spline_a->calculate_segment_insertion(start_a, mod_i(start_a + 1, spline_a->positions().size()), start_a_offset);
+
+          result_spline->handle_positions_right()[result_spline->size() - 1] = insert_a.handle_prev;
+          result_spline->handle_positions_left()[0] = insert_a.left_handle;
+        }
+        else
+        {
+          float result_v = (intersection_offset_a - last_intersection_offset[0]) / (1 - last_intersection_offset[0]);
+
+          insert_a = result_spline->calculate_segment_insertion(result_spline->size() - 2, result_spline->size() - 1, result_v);
+
+          result_spline->resize(result_spline->size() - 1);
+          result_spline->mark_cache_invalid();
+
+          result_spline->handle_positions_right()[result_spline->size() - 1] = insert_a.handle_prev;
+          result_spline->handle_positions_left()[0] = insert_a.left_handle;
+        }
+      }
+      else
+      {
+        copy_segments(mod_i(start_a + 1, segment_count_a), last_a_segment, result_spline.get(), spline_a, segment_count_a, control_point_count_a);
+        insert_a = spline_a->calculate_segment_insertion(start_a, mod_i(start_a + 1, spline_a->positions().size()), intersection_offset_a);
+
+        result_spline->resize(result_spline->size() - 1);
+        result_spline->mark_cache_invalid();
+
+        result_spline->handle_positions_right()[result_spline->size() - 1] = insert_a.handle_prev;
+        result_spline->handle_positions_left()[0] = insert_a.left_handle;
+      }
+
+      // TODO : Can't we calculate the scale of the handle instead (and more easily?)
+
+      // result_spline->positions()[0] = insert_a.position;
+
       std::cout << "EXITED WITH " << last_a_segment << std::endl << std::flush;
 
       result_spline->set_cyclic(spline_a->is_cyclic());
-
     }
   }
 a:
 
+  print("FINALIZING");
 
-  result_spline->set_resolution(resolution);
-  result_spline->attributes.reallocate(result_spline->size());
-  result->add_spline(std::move(result_spline));
-  result->attributes.reallocate(result->splines().size());
-
+  if (result_spline->size() > 0)
+  {
+    // result_spline->attributes.reallocate(result_spline->size());
+    result->add_spline(std::move(result_spline));
+    result->attributes.reallocate(result->splines().size());
+  }
   return result;
 }
 
-static std::unique_ptr<CurveEval> create_bezier_segment_curve(
-    const float3 start,
-    const float3 start_handle_right,
-    const float3 end,
-    const float3 end_handle_left,
-    const int resolution,
-    const GeometryNodeCurvePrimitiveBezierSegmentMode mode)
+static std::unique_ptr<CurveEval> create_bezier_segment_curve(const float3 start, const float3 start_handle_right, const float3 end, const float3 end_handle_left, const int resolution, const GeometryNodeCurvePrimitiveBezierSegmentMode mode)
 {
   std::unique_ptr<CurveEval> curve = std::make_unique<CurveEval>();
   std::unique_ptr<BezierSpline> spline = std::make_unique<BezierSpline>();
 
   if (mode == GEO_NODE_CURVE_PRIMITIVE_BEZIER_SEGMENT_POSITION)
   {
-    spline->add_point(start,
-                      BezierSpline::HandleType::Align,
-                      2.0f * start - start_handle_right,
-                      BezierSpline::HandleType::Align,
-                      start_handle_right,
-                      1.0f,
-                      0.0f);
-    spline->add_point(end,
-                      BezierSpline::HandleType::Align,
-                      end_handle_left,
-                      BezierSpline::HandleType::Align,
-                      2.0f * end - end_handle_left,
-                      1.0f,
-                      0.0f);
+    spline->add_point(start, BezierSpline::HandleType::Align, 2.0f * start - start_handle_right, BezierSpline::HandleType::Align, start_handle_right, 1.0f, 0.0f);
+    spline->add_point(end, BezierSpline::HandleType::Align, end_handle_left, BezierSpline::HandleType::Align, 2.0f * end - end_handle_left, 1.0f, 0.0f);
   }
   else
   {
-    spline->add_point(start,
-                      BezierSpline::HandleType::Align,
-                      start - start_handle_right,
-                      BezierSpline::HandleType::Align,
-                      start + start_handle_right,
-                      1.0f,
-                      0.0f);
-    spline->add_point(end,
-                      BezierSpline::HandleType::Align,
-                      end + end_handle_left,
-                      BezierSpline::HandleType::Align,
-                      end - end_handle_left,
-                      1.0f,
-                      0.0f);
+    spline->add_point(start, BezierSpline::HandleType::Align, start - start_handle_right, BezierSpline::HandleType::Align, start + start_handle_right, 1.0f, 0.0f);
+    spline->add_point(end, BezierSpline::HandleType::Align, end + end_handle_left, BezierSpline::HandleType::Align, end - end_handle_left, 1.0f, 0.0f);
   }
 
   spline->set_resolution(resolution);
@@ -638,8 +772,8 @@ static void geo_node_curve_bool_exec(GeoNodeExecParams params)
   const bNode &node = params.node();
   const BoolDomainType data_type = static_cast<BoolDomainType>(node.custom2);
 
-  std::unique_ptr<CurveEval> curve = intersect(curve_set_a.get_curve_for_read(),
-                                               curve_set_b.get_curve_for_read(),data_type);  //,curve.get()
+  std::unique_ptr<CurveEval> curve = intersect(curve_set_a.get_curve_for_read(), curve_set_b.get_curve_for_read(),
+                                               data_type);  //,curve.get()
   params.set_output("Curve", GeometrySet::create_with_curve(curve.release()));
 
   // return;

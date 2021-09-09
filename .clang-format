@@ -35,7 +35,7 @@ BinPackArguments: false
 BinPackParameters: false
 
 # Line width (don't exceed 100).
-ColumnLimit: 99
+ColumnLimit: 500
 
 # Cause initializer lists to have one member initialized per line, in the case
 # that all initializers can't fit on a single line.

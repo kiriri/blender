@@ -9615,8 +9615,9 @@ static void def_geo_curve_primitive_line(StructRNA *srna)
 
 const EnumPropertyItem curve_bool_items[] =
 {
-  {0, "OR", 0, "Or", "Any area that is either in A or B."},
-  {1, "AND", 0, "And", "Any area that is both in A and B."},
+  {0, "OR", 0, "Union", "Any area that is either in A or B."},
+  {1, "AND", 0, "Intersection", "Any area that is both in A and B."},
+  {2, "SUB", 0, "Difference", "Any area that is in A but not in B."},
   {0, NULL, 0, NULL, NULL},
 };
 
