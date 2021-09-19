@@ -3107,6 +3107,7 @@ static int keyframe_jump_exec(bContext *C, wmOperator *op)
       mask_to_keylist(&ads, masklay, keylist);
     }
   }
+  ED_keylist_prepare_for_direct_access(keylist);
 
   /* find matching keyframe in the right direction */
   const ActKeyColumn *ak;
@@ -5689,6 +5690,7 @@ void ED_operatortypes_screen(void)
   WM_operatortype_append(SCREEN_OT_back_to_previous);
   WM_operatortype_append(SCREEN_OT_spacedata_cleanup);
   WM_operatortype_append(SCREEN_OT_screenshot);
+  WM_operatortype_append(SCREEN_OT_screenshot_area);
   WM_operatortype_append(SCREEN_OT_userpref_show);
   WM_operatortype_append(SCREEN_OT_drivers_editor_show);
   WM_operatortype_append(SCREEN_OT_info_log_show);
