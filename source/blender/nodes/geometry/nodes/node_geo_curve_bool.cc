@@ -44,7 +44,6 @@
  * BUGS:
  *
  * TODO:
- * Attributes like radius.
  * Vertex Paths
  * Splines to bezier conversion.
  * Optional hard corners so attributes like radius stick
@@ -94,7 +93,7 @@ void print_a(std::list<blender::float3> const &list)
 
 void print(std::string s)
 {
-  //std::cout << s << std::endl << std::flush;
+  std::cout << s << std::endl << std::flush;
 }
 
 static std::chrono::_V2::system_clock::time_point time;
@@ -233,6 +232,7 @@ struct CurveHull
   int pass = -1;
   int is_inside = -1; // used when tracing. If true, the next intersection is passed right through. 0 means false, 1 means true, -1 means undefined
 
+  // Find the next control point that HAS intersections
   CurveHull *next_intersection(bool include_self = false, CurveHull *__start = nullptr)
   {
     if (include_self && ((intersections.size() > 0)))
@@ -260,6 +260,7 @@ struct CurveHull
     return next->next_intersection(true, __start);
   }
 
+  // Find the next point that IS an intersection
   CurveHull *next_intersection2(bool include_self = false, CurveHull *__start = nullptr)
   {
     if (include_self && intersection != nullptr)
@@ -332,7 +333,7 @@ static std::list<CurveHull *> bezierIntersectAll2(std::vector<std::vector<Spline
   int c = splines.size();
   for (int i = 0; i < c; i++)
   {
-    for (Spline* _spline : splines[i])  // TODO : Add reference to original SplinePtr
+    for (Spline* _spline : splines[i])
     {
       frontier.push_back(points_to_hull(_spline, i));
       CurveHull* last = frontier.back();
@@ -393,9 +394,6 @@ static std::list<CurveHull *> bezierIntersectAll2(std::vector<std::vector<Spline
       next_curve_hull_a = current_curve_hull_a->next;
     }
 
-    if(primary_curve == nullptr)
-      print("HOW?!?!?!");
-
     results.push_back(primary_curve);
     pass++;
   }
@@ -451,29 +449,37 @@ static std::list<CurveHull *> bezierIntersectAll2(std::vector<std::vector<Spline
  * Switch the direction of the spline.
  * TODO : Switch tilt and radius and whatever else gets changed when spline->resize() is called.
  */
-static int switch_direction(BezierSpline *spline)
+static int switch_direction(Spline *spline)
 {
-  auto points = spline->positions();
-  auto handles_l = spline->handle_positions_left();
-  auto handles_r = spline->handle_positions_right();
-  auto tilts = spline->tilts();
-  auto radii = spline->radii();
+  Spline::Type type = spline->type();
+  MutableSpan<float3> points = spline->positions();
+  MutableSpan<float3> handles_l;
+  MutableSpan<float3> handles_r;
+  if(type == Spline::Type::Bezier)
+  {
+    handles_l = ((BezierSpline*)spline)->handle_positions_left();
+    handles_r = ((BezierSpline*)spline)->handle_positions_right();
+  }
+  MutableSpan<float> tilts = spline->tilts();
+  MutableSpan<float> radii = spline->radii();
 
   int length = points.size();
 
   for (int i = 0; i < length / 2; i++)
   {
     std::swap(points[i], points[length - i - 1]);
-    std::swap(handles_l[i], handles_r[length - i - 1]);
-    std::swap(handles_r[i], handles_l[length - i - 1]);
+    if(type == Spline::Type::Bezier)
+    {
+      std::swap(handles_l[i], handles_r[length - i - 1]);
+      std::swap(handles_r[i], handles_l[length - i - 1]);
+    }
     std::swap(tilts[i], tilts[length - i - 1]);
     std::swap(radii[i], radii[length - i - 1]);
   }
-  if(length % 2)
+
+  if(type == Spline::Type::Bezier && (length % 2) )
   {
 	  std::swap(handles_l[length/2], handles_r[length/2]);
-	  std::swap(tilts[length/2], tilts[length/2]);
-	  std::swap(radii[length/2], radii[length/2]);
   }
 
   spline->mark_cache_invalid();
@@ -492,9 +498,9 @@ typedef enum BoolDomainType
 } BoolDomainType;
 
 /**
- * A virtual BezierSpline point. Contains all the data to create a real bezier spline point from, but is all in one place (real bezier splines have separate arrays for each individual attribute)
+ * A virtual Spline point. Contains all the data to create a real (bezier-)spline point from, but is all in one place (real splines have separate arrays for each individual attribute)
  */
-struct BezierSplinePoint
+struct SplinePoint
 {
   float3 position;
   float3 handle_position_left;
@@ -502,7 +508,7 @@ struct BezierSplinePoint
   float radius;
   float tilt;
 
-  BezierSplinePoint(BezierSpline* curve, int index)
+  SplinePoint(BezierSpline* curve, int index)
   {
     position = curve->positions()[index];
     handle_position_left = curve->handle_positions_left()[index];
@@ -511,9 +517,22 @@ struct BezierSplinePoint
     tilt = curve->tilts()[index];
   }
 
-  BezierSplinePoint(float3 position,
+  SplinePoint(Spline* curve, int index)
+  {
+    position = curve->positions()[index];
+    radius = curve->radii()[index];
+    tilt = curve->tilts()[index];
+  }
+
+  SplinePoint(float3 position,
   float3 handle_position_left,
   float3 handle_position_right,
+  float radius,
+  float tilt):position(position),handle_position_left(handle_position_left),handle_position_right(handle_position_right),radius(radius),tilt(tilt)
+  {
+  }
+
+  SplinePoint(float3 position,
   float radius,
   float tilt):position(position),handle_position_left(handle_position_left),handle_position_right(handle_position_right),radius(radius),tilt(tilt)
   {
@@ -540,7 +559,7 @@ BezierSpline::InsertResult calculate_bezier_segment_insertion(float3 pos_prev, f
 /**
  * Checks if the current point is a control point. If so, add it to the result and set last_intersection_offset to 0.
  */
-static float process_control_point(CurveHull* current_point, std::vector<BezierSplinePoint>& result, float last_intersection_offset = 0)
+static float process_control_point(CurveHull* current_point, std::vector<SplinePoint>& result, float last_intersection_offset = 0)
 {
   print("Processing control");
   int segment_count = current_point->spline->segments_size();
@@ -549,19 +568,24 @@ static float process_control_point(CurveHull* current_point, std::vector<BezierS
   if ((current_point->curve_i % resolution) != 0)
     return last_intersection_offset;
 
-  BezierSpline *current_spline = (BezierSpline *)current_point->spline;
-
   float current_absolute_v = current_point->curve_i / (float)(resolution); // control point index + v along segment
   int current_control_point = (int)(current_absolute_v);
 
-  result.push_back(
-    BezierSplinePoint(
-      current_spline->evaluated_positions()[current_point->curve_i],
-      float3::interpolate(current_spline->handle_positions_left()[current_control_point],current_spline->positions()[current_control_point],last_intersection_offset),
-      current_spline->handle_positions_right()[current_control_point],
-      current_spline->radii()[current_control_point],
-      current_spline->tilts()[current_control_point])
-    );
+  if(current_point->spline->type() == Spline::Type::Bezier)
+  {
+    BezierSpline *current_spline = (BezierSpline *)current_point->spline;
+
+    result.push_back(
+      SplinePoint(
+        current_spline->evaluated_positions()[current_point->curve_i],
+        float3::interpolate(current_spline->handle_positions_left()[current_control_point],current_spline->positions()[current_control_point],last_intersection_offset),
+        current_spline->handle_positions_right()[current_control_point],
+        current_spline->radii()[current_control_point],
+        current_spline->tilts()[current_control_point])
+      );
+  }
+  else
+    result.push_back(SplinePoint(current_point->spline,current_control_point));
 
   return 0;
 }
@@ -570,82 +594,107 @@ static float process_control_point(CurveHull* current_point, std::vector<BezierS
  * Process a CurveHull point that is an intersection.
  * Update frontier with paths not taken, and create BezierSplinePoints with interpolated bezier handles.
  */
-static CurveHull* process_intersection(CurveHull* current_point, std::vector<BezierSplinePoint>& result, float& last_intersection_offset,std::list<CurveHull*>& frontier, bool pass_through = false)
+static CurveHull* process_intersection(CurveHull* current_point, std::vector<SplinePoint>& result, float& last_intersection_offset,std::list<CurveHull*>& frontier, Spline::Type type, bool pass_through = false)
 {
   print("Processing intersection");
-  Intersection *current_intersection = current_point->intersection;
-
-  CurveHull* next_point = current_intersection->target->hull;
-
-  int segment_count = current_point->spline->segments_size();
-  int segment_count_next = next_point->spline->segments_size();
-
-  BezierSpline *current_spline = (BezierSpline *)current_point->spline;
-  BezierSpline *next_spline = (BezierSpline *)next_point->spline;
-
-  int current_resolution = current_spline->evaluated_points_size() / segment_count;
-  int next_resolution = next_spline->evaluated_points_size() / segment_count_next;
-
-  float current_absolute_v = current_point->curve_i / (float)(current_resolution); // TODO : How do we derive the same from current_point->v? current_point->v * segment_count
-  int current_control_point = (int)(current_absolute_v);
-  float current_relative_v = fmod(current_absolute_v , 1);
-  //float current_relative_v = fmod((current_point->v * segment_count),1.0f);
-
-  float next_absolute_v = next_point->curve_i / (float)(next_resolution);
-  int next_control_point = (int)(next_absolute_v);
-  float next_relative_v = fmod(next_absolute_v, 1);
-  //float next_relative_v = fmod((next_point->v * segment_count_next),1.0f);
-
-  int current_evaluated_i = current_intersection->hull->curve_i; // TODO : Is this not the same as current_control_point?
-  int next_evaluated_i = (current_intersection->hull->curve_i + 1) % current_spline->evaluated_points_size();
-
-  int current_segment_end = (current_control_point + 1) % current_spline->positions().size();
-
-  float v_cur = (current_relative_v + current_intersection->v / current_resolution - last_intersection_offset) / (1 - last_intersection_offset);
 
   bool first = result.size() == 0;
-  blender::float3 last_pos = first ? current_spline->positions()[current_control_point] : result.back().position ;
-  blender::float3 last_handle = first ? current_spline->handle_positions_right()[current_control_point] : result.back().handle_position_right ;
-  BezierSpline::InsertResult insert_current = calculate_bezier_segment_insertion(
-    last_pos,
-    last_handle,
-    current_spline->positions()[current_segment_end],
-    float3::interpolate(current_spline->handle_positions_left()[current_segment_end],current_spline->positions()[current_segment_end],last_intersection_offset),
-    v_cur);
+  float v_next = 0;
+  Intersection *current_intersection = current_point->intersection;
 
-  int next_segment_end = (next_control_point + 1) % next_spline->handle_positions_left().size();
-  float v_next = next_relative_v + current_intersection->target->v / next_resolution;
+  CurveHull* other_point = current_intersection->target->hull;
 
 
-  BezierSpline::InsertResult insert_next = calculate_bezier_segment_insertion(
-    next_spline->positions()[next_control_point],
-    next_spline->handle_positions_right()[next_control_point],
-    next_spline->positions()[next_segment_end],
-    next_spline->handle_positions_left()[next_segment_end],
-    v_next);
+  int segment_count = current_point->spline->segments_size();
+  int segment_count_next = other_point->spline->segments_size();
 
-  if(result.size() > 0)
-    result.back().handle_position_right = insert_current.handle_prev;
+  if(type == Spline::Type::Bezier)
+  {
+    BezierSpline *current_spline = (BezierSpline*)current_point->spline;
+    BezierSpline *other_spline = (BezierSpline*)other_point->spline;
 
-  float3 real_pos = current_intersection->hull->position; // the intersection point on the EVALUATED geometry
-  float3 bezier_pos_current = insert_current.position; // the intersection point the handles belong to (can vary drastically if resolution is very low)
-  float3 bezier_pos_next = insert_next.position;
+    int current_resolution = current_spline->evaluated_points_size() / segment_count;
+    int next_resolution = other_spline->evaluated_points_size() / segment_count_next;
 
-  result.push_back(
-    BezierSplinePoint(
-      real_pos,
-      insert_current.left_handle ,//+ real_pos - bezier_pos_current
-      insert_next.right_handle , // + real_pos - bezier_pos_next
-      (1 - current_relative_v) * current_spline->radii()[current_control_point] + current_relative_v * current_spline->radii()[current_segment_end],
-      (1 - current_relative_v) * current_spline->tilts()[current_control_point] + current_relative_v * current_spline->tilts()[current_segment_end]) // TODO : Interpolate? But it'll be wrong either way, so why bother?
-    );
+    float current_absolute_v = current_point->curve_i / (float)(current_resolution); // TODO : How do we derive the same from current_point->v? current_point->v * segment_count
+    int current_control_point = (int)(current_absolute_v);
+    float current_relative_v = fmod(current_absolute_v , 1);
+    //float current_relative_v = fmod((current_point->v * segment_count),1.0f);
+
+    float next_absolute_v = other_point->curve_i / (float)(next_resolution);
+    int next_control_point = (int)(next_absolute_v);
+    float next_relative_v = fmod(next_absolute_v, 1);
+    //float next_relative_v = fmod((next_point->v * segment_count_next),1.0f);
+
+    int current_evaluated_i = current_intersection->hull->curve_i;
+    int next_evaluated_i = (current_intersection->hull->curve_i + 1) % current_spline->evaluated_points_size();
+
+    int current_segment_end = (current_control_point + 1) % current_spline->positions().size();
+
+    float v_cur = (current_relative_v + current_intersection->v / current_resolution - last_intersection_offset) / (1 - last_intersection_offset);
+
+
+    blender::float3 last_pos = first ? current_spline->positions()[current_control_point] : result.back().position ;
+    blender::float3 last_handle = first ? current_spline->handle_positions_right()[current_control_point] : result.back().handle_position_right ;
+    BezierSpline::InsertResult insert_current = calculate_bezier_segment_insertion(
+      last_pos,
+      last_handle,
+      current_spline->positions()[current_segment_end],
+      float3::interpolate(current_spline->handle_positions_left()[current_segment_end],current_spline->positions()[current_segment_end],last_intersection_offset),
+      v_cur);
+
+    int next_segment_end = (next_control_point + 1) % other_spline->handle_positions_left().size();
+    v_next = next_relative_v + current_intersection->target->v / next_resolution;
+
+
+    BezierSpline::InsertResult insert_next = calculate_bezier_segment_insertion(
+      other_spline->positions()[next_control_point],
+      other_spline->handle_positions_right()[next_control_point],
+      other_spline->positions()[next_segment_end],
+      other_spline->handle_positions_left()[next_segment_end],
+      v_next);
+
+    if(result.size() > 0)
+      result.back().handle_position_right = insert_current.handle_prev;
+
+    float3 real_pos = current_intersection->hull->position; // the intersection point on the EVALUATED geometry
+    float3 bezier_pos_current = insert_current.position; // the intersection point the handles belong to (can vary drastically if resolution is very low)
+    float3 bezier_pos_next = insert_next.position;
+
+    result.push_back(
+      SplinePoint(
+        real_pos,
+        insert_current.left_handle ,//+ real_pos - bezier_pos_current
+        insert_next.right_handle , // + real_pos - bezier_pos_next
+        (1 - current_relative_v) * current_spline->radii()[current_control_point] + current_relative_v * current_spline->radii()[current_segment_end],
+        (1 - current_relative_v) * current_spline->tilts()[current_control_point] + current_relative_v * current_spline->tilts()[current_segment_end]) // TODO : Interpolate? But it'll be wrong either way, so why bother?
+      );
+  }
+  else
+  {
+    Spline *current_spline = current_point->spline;
+    Spline *other_spline = other_point->spline;
+
+    float current_absolute_v = current_point->v * segment_count;//current_point->curve_i / (float)(current_resolution); // TODO : How do we derive the same from current_point->v? current_point->v * segment_count
+    int current_control_point = (int)(current_absolute_v);
+    int current_segment_end = (current_control_point + 1) % current_spline->positions().size();
+    float current_relative_v = fmod(current_absolute_v , 1);
+
+    float3 real_pos = current_intersection->hull->position;
+    result.push_back(
+      SplinePoint(
+        real_pos,
+        (1 - current_relative_v) * current_spline->radii()[current_control_point] + current_relative_v * current_spline->radii()[current_segment_end],
+        (1 - current_relative_v) * current_spline->tilts()[current_control_point] + current_relative_v * current_spline->tilts()[current_segment_end]) // TODO : Interpolate? But it'll be wrong either way, so why bother?
+      );
+  }
 
   // if an intersection is the first point to be processed, keep following the current curve and add the other curve to the frontier instead
   if(first && pass_through)
   {
     last_intersection_offset = v_next;
     //current_point->pass = -2;
-    next_point->pass = -2;
+    other_point->pass = -2;
 
     CurveHull* next_possible_frontier = current_point->next_intersection2();
     if(next_possible_frontier != nullptr)
@@ -653,19 +702,19 @@ static CurveHull* process_intersection(CurveHull* current_point, std::vector<Bez
       frontier.push_back(next_possible_frontier->intersection->target->hull);
     }
 
-    return next_point->next;
+    return other_point->next;
   }
   else
   {
     last_intersection_offset = v_next;
-    next_point->pass = -2;
+    other_point->pass = -2;
 
     CurveHull* next_possible_frontier = current_point->next_intersection2();
     if(next_possible_frontier != nullptr)
     {
       frontier.push_back(next_possible_frontier->intersection->target->hull);
     }
-    return next_point->next;
+    return other_point->next;
   }
 
 }
@@ -673,10 +722,10 @@ static CurveHull* process_intersection(CurveHull* current_point, std::vector<Bez
 /**
  * Turn a path WITH NO INTERSECTION into an actual bezier path
  */
-static void copy_curve(std::vector<std::vector<BezierSplinePoint>> &results, CurveHull *path)
+static void copy_curve(std::vector<std::vector<SplinePoint>> &results, CurveHull *path)
 {
   print("Copying");
-  std::vector<BezierSplinePoint> result;
+  std::vector<SplinePoint> result;
 
   CurveHull* start_point = path;
   CurveHull* current_point = start_point;
@@ -698,7 +747,7 @@ static void copy_curve(std::vector<std::vector<BezierSplinePoint>> &results, Cur
  * Walk along a CurveHull and turn it into virtual BezierSplinePoints.
  * These will contain all the data needed to turn them into real BezierSplines, but can be tossed more easily if they don't form desired topologies.
  */
-static void trace_hull(std::vector<std::vector<BezierSplinePoint>> &results, CurveHull *path, BoolDomainType type)
+static void trace_hull(std::vector<std::vector<SplinePoint>> &results, CurveHull *path, BoolDomainType type, Spline::Type return_type)
 {
   print("Tracing");
   std::list<CurveHull*> frontier;
@@ -706,7 +755,7 @@ static void trace_hull(std::vector<std::vector<BezierSplinePoint>> &results, Cur
 
   while(frontier.size() > 0)
   {
-    std::vector<BezierSplinePoint> result;
+    std::vector<SplinePoint> result;
     CurveHull* start_point = frontier.front();
     frontier.pop_front();
 
@@ -745,23 +794,15 @@ static void trace_hull(std::vector<std::vector<BezierSplinePoint>> &results, Cur
     if(next_point == nullptr)
       continue;
 
-    //int panic = 0;
     float last_intersection_offset = 0;
-
     do
     {
-
       current_point->pass = -2;
-      // if (panic++ > 777)
-      // {
-      //   print("PANIC B");
-      //   break;
-      // }
 
       // current point is a virtual intersection point
       if(current_point->intersection != nullptr)
       {
-        current_point = process_intersection(current_point,result,last_intersection_offset,frontier, first);
+        current_point = process_intersection(current_point,result,last_intersection_offset,frontier, return_type, first);
       }
       else
       {
@@ -779,31 +820,33 @@ static void trace_hull(std::vector<std::vector<BezierSplinePoint>> &results, Cur
       {
         continue; // skip, didn't reach a valid target.
       }
-
-      // if cyclic, make sure the initial point's left handle scales with any previous intersection. (If not cyclic, those handles aren't used)
-      if(current_point->intersection != nullptr)
+      if(return_type == Spline::Type::Bezier)
       {
-        int segment_count = current_point->spline->segments_size() ;
+        // if cyclic, make sure the initial point's left handle scales with any previous intersection. (If not cyclic, those handles aren't used)
+        if(current_point->intersection != nullptr)
+        {
+          int segment_count = current_point->spline->segments_size() ;
 
-        BezierSpline *current_spline = (BezierSpline *)current_point->spline;
+          BezierSpline *current_spline = (BezierSpline *)current_point->spline;
 
-        float current_relative_v = fmod((start_point->v * segment_count),1.0f);
+          float current_relative_v = fmod((start_point->v * segment_count),1.0f);
 
-        // both handles are already resized to the following sizes
-        float expected_distance_right = 1 - last_intersection_offset;
-        float expected_distance_left = current_relative_v; // should this not be the start's point instead?
+          // both handles are already resized to the following sizes
+          float expected_distance_right = 1 - last_intersection_offset;
+          float expected_distance_left = current_relative_v; // should this not be the start's point instead?
 
-        // but because of this new intersection, they will need to be this size instead
-        float proportional_distance_right = (1 - current_relative_v) / expected_distance_right;
-        float proportional_distance_left = last_intersection_offset / expected_distance_left;
+          // but because of this new intersection, they will need to be this size instead
+          float proportional_distance_right = (1 - current_relative_v) / expected_distance_right;
+          float proportional_distance_left = last_intersection_offset / expected_distance_left;
 
 
-        result.front().handle_position_left = float3::interpolate(result.front().handle_position_left,result.front().position,proportional_distance_left);
-        result.back().handle_position_right = float3::interpolate(result.back().handle_position_right,result.back().position, proportional_distance_right );
-      }
-      else
-      {
-          result.front().handle_position_left = float3::interpolate(result.front().handle_position_left,result.front().position,last_intersection_offset);
+          result.front().handle_position_left = float3::interpolate(result.front().handle_position_left,result.front().position,proportional_distance_left);
+          result.back().handle_position_right = float3::interpolate(result.back().handle_position_right,result.back().position, proportional_distance_right );
+        }
+        else
+        {
+            result.front().handle_position_left = float3::interpolate(result.front().handle_position_left,result.front().position,last_intersection_offset);
+        }
       }
     }
     results.push_back(result);
@@ -814,19 +857,31 @@ static void trace_hull(std::vector<std::vector<BezierSplinePoint>> &results, Cur
 /**
  * Turn a list of virtual BezierSplinePoints into a real BezierSpline
  */
-static void trace_to_bezier(std::vector<BezierSplinePoint> trace, BezierSpline* result)
+static void trace_to_bezier(std::vector<SplinePoint> trace, BezierSpline* result)
 {
   print("Trace to bezier");
   int size = trace.size();
     print(std::to_string(size));
   for(int i = 0; i < size; i++)
   {
-    print(std::to_string(i));
-    BezierSplinePoint point = trace[i];
+    SplinePoint point = trace[i];
     result->add_point(point.position,BezierSpline::HandleType::Free, point.handle_position_left, BezierSpline::HandleType::Free, point.handle_position_right, point.radius, point.tilt);
-    print(std::to_string(i));
   }
+}
 
+/**
+ * Turn a list of virtual SplinePoints into a real PolySpline
+ */
+static void trace_to_poly(std::vector<SplinePoint> trace, PolySpline* result)
+{
+  print("Trace to poly");
+  int size = trace.size();
+    print(std::to_string(size));
+  for(int i = 0; i < size; i++)
+  {
+    SplinePoint point = trace[i];
+    result->add_point(point.position, point.radius, point.tilt);
+  }
 }
 
 static bool is_curve_clockwise(Spline* spline)
@@ -865,14 +920,14 @@ static bool is_curve_clockwise(Spline* spline)
 // filter_span<SplinePtr>(a->splines(),[](const SplinePtr& spline)->bool{return (bool)(spline->type() == Spline::Type::Bezier);});
 
 
-std::vector<Spline*> filter_non_bezier(blender::Span<SplinePtr> s)
+std::vector<Spline*> filter_nurbs(blender::Span<SplinePtr> s)
 {
   std::vector<Spline*> result = {};
 
   int size = s.size();
   for(const SplinePtr &spline : s)
   {
-    if(spline->type() == Spline::Type::Bezier)
+    if(spline->type() != Spline::Type::NURBS)
       result.push_back(spline.get());
   }
 
@@ -893,9 +948,20 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
   std::unique_ptr<CurveEval> result = std::make_unique<CurveEval>();
 
   const char *types[] = {"Bezier", "NURBS", "Poly"};
-  std::vector<Spline*> splines_a = filter_non_bezier(a->splines());  // each CurveEval object can contain several unconnected curves.
-  std::vector<Spline*> splines_b = filter_non_bezier(b->splines());
+  std::vector<Spline*> splines_a = filter_nurbs(a->splines());  // each CurveEval object can contain several unconnected curves.
+  std::vector<Spline*> splines_b = filter_nurbs(b->splines());
   std::vector<std::vector<Spline*>> splines = {splines_a, splines_b};
+
+  Spline::Type result_type = Spline::Type::Bezier;
+
+  for(Span<Spline*> _splines : splines)
+  {
+    for(Spline* spline : _splines)
+    {
+      if(spline->type() != Spline::Type::Bezier)
+        result_type = Spline::Type::Poly;
+    }
+  }
 
   for(Span<Spline*> _splines : splines)
   {
@@ -904,6 +970,8 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
       // All bezier handles must be free or else updating the curve will "correct" them.
       if(spline->type() == Spline::Type::Bezier)
       {
+        // TODO : If result_type == Poly, convert.
+
         BezierSpline* bezier_spline = ((BezierSpline*)spline);
         MutableSpan<BezierSpline::HandleType> handles_left_t = bezier_spline->handle_types_left();
         MutableSpan<BezierSpline::HandleType> handles_right_t = bezier_spline->handle_types_right();
@@ -928,7 +996,7 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
 
       if(counter % 2 == (is_clockwise ? 1 : 0)) // curve represents negative space, must go counterclockwise
       {
-        switch_direction((BezierSpline*)spline);
+        switch_direction(spline);
       }
     }
   }
@@ -938,18 +1006,18 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
   {
     for(Spline* spline : splines_a)
     {
-      switch_direction((BezierSpline*)spline);
+      switch_direction(spline);
     }
     for(Spline* spline : splines_b)
     {
-      switch_direction((BezierSpline*)spline);
+      switch_direction(spline);
     }
   }
   else if (type == BoolDomainType::SUB)
   {
     for(Spline* spline : splines_b)
     {
-      switch_direction((BezierSpline*)spline);
+      switch_direction(spline);
     }
   }
 
@@ -963,7 +1031,7 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
     print("Loop");
     if(path == nullptr)
       print("Loop is nullptr");
-    std::vector<std::vector<BezierSplinePoint>> results;
+    std::vector<std::vector<SplinePoint>> results;
     if (path->next_intersection2() == nullptr) // Path does not intersect with anything
     {
       // count the number of curves that contain this one. Depending on the mode, and if it's contained in the other curve, toss it, or keep it as-is.
@@ -985,20 +1053,39 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
       }
     }
     else
-      trace_hull(results, path, type);
+      trace_hull(results, path, type, result_type);
 
     // Now turn our virtual control points into a real bezier curve
-    for(std::vector<BezierSplinePoint> trace : results)
+
+    if(result_type == Spline::Type::Bezier)
     {
-      std::unique_ptr<BezierSpline>  result_spline = std::make_unique<BezierSpline>();
-      result_spline->set_resolution(resolution);
+      for(std::vector<SplinePoint> trace : results)
+      {
+        std::unique_ptr<BezierSpline>  result_spline = std::make_unique<BezierSpline>();
+        result_spline->set_resolution(resolution);
 
-      trace_to_bezier(trace,result_spline.get());
-      result_spline->set_cyclic(true);
+        trace_to_bezier(trace,result_spline.get());
+        result_spline->set_cyclic(true);
 
-      result->add_spline(std::move(result_spline));
+        result->add_spline(std::move(result_spline));
 
-      length += result->splines().size();
+        length += result->splines().size();
+      }
+    }
+    else
+    {
+      for(std::vector<SplinePoint> trace : results)
+      {
+        std::unique_ptr<PolySpline>  result_spline = std::make_unique<PolySpline>();
+        //result_spline->set_resolution(resolution);
+
+        trace_to_poly(trace,result_spline.get());
+        result_spline->set_cyclic(true);
+
+        result->add_spline(std::move(result_spline));
+
+        length += result->splines().size();
+      }
     }
   }
   result->attributes.reallocate(length);
