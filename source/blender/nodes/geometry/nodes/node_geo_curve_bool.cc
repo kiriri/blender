@@ -44,8 +44,9 @@
  * BUGS:
  *
  * TODO:
- * Vertex Paths
+ * Mixed Bezier + Vertex Paths => Set evaluated points in Bezier, not just control points.
  * Splines to bezier conversion.
+ * Fix memory leak.
  * Optional hard corners so attributes like radius stick
  * Conformity slider : If 1, map intersection points to geometry, if 0, map to bezier curve. Interpolate between.
  * If either of the curves self intersect, show a warning.
@@ -559,20 +560,21 @@ BezierSpline::InsertResult calculate_bezier_segment_insertion(float3 pos_prev, f
 /**
  * Checks if the current point is a control point. If so, add it to the result and set last_intersection_offset to 0.
  */
-static float process_control_point(CurveHull* current_point, std::vector<SplinePoint>& result, float last_intersection_offset = 0)
+static float process_control_point(CurveHull* current_point, std::vector<SplinePoint>& result, Spline::Type type, float last_intersection_offset = 0)
 {
   print("Processing control");
   int segment_count = current_point->spline->segments_size();
   int resolution = current_point->spline->evaluated_points_size() / segment_count;
 
-  if ((current_point->curve_i % resolution) != 0)
-    return last_intersection_offset;
+
 
   float current_absolute_v = current_point->curve_i / (float)(resolution); // control point index + v along segment
   int current_control_point = (int)(current_absolute_v);
 
-  if(current_point->spline->type() == Spline::Type::Bezier)
+  if(type == Spline::Type::Bezier)
   {
+    if ((current_point->curve_i % resolution) != 0)
+      return last_intersection_offset;
     BezierSpline *current_spline = (BezierSpline *)current_point->spline;
 
     result.push_back(
@@ -585,7 +587,20 @@ static float process_control_point(CurveHull* current_point, std::vector<SplineP
       );
   }
   else
-    result.push_back(SplinePoint(current_point->spline,current_control_point));
+  {
+    Spline *current_spline = current_point->spline;
+
+    float current_absolute_v = current_point->v * segment_count;
+    int current_control_point = (int)(current_absolute_v);
+    int current_segment_end = (current_control_point + 1) % current_spline->positions().size();
+    float current_relative_v = fmod(current_absolute_v , 1);
+    result.push_back(
+      SplinePoint(
+        current_spline->evaluated_positions()[current_point->curve_i],
+        (1 - current_relative_v) * current_spline->radii()[current_control_point] + current_relative_v * current_spline->radii()[current_segment_end],
+        (1 - current_relative_v) * current_spline->tilts()[current_control_point] + current_relative_v * current_spline->tilts()[current_segment_end]) // TODO : Interpolate? But it'll be wrong either way, so why bother?
+      );
+  }
 
   return 0;
 }
@@ -722,7 +737,7 @@ static CurveHull* process_intersection(CurveHull* current_point, std::vector<Spl
 /**
  * Turn a path WITH NO INTERSECTION into an actual bezier path
  */
-static void copy_curve(std::vector<std::vector<SplinePoint>> &results, CurveHull *path)
+static void copy_curve(std::vector<std::vector<SplinePoint>> &results, CurveHull *path, Spline::Type type)
 {
   print("Copying");
   std::vector<SplinePoint> result;
@@ -732,7 +747,7 @@ static void copy_curve(std::vector<std::vector<SplinePoint>> &results, CurveHull
 
   while (current_point != nullptr)
   {
-    process_control_point(current_point, result); // if the current point is a control point, processes it. Otherwise, skips it.
+    process_control_point(current_point, result, type); // if the current point is a control point, processes it. Otherwise, skips it.
 
     current_point = current_point->next;
 
@@ -806,7 +821,7 @@ static void trace_hull(std::vector<std::vector<SplinePoint>> &results, CurveHull
       }
       else
       {
-        last_intersection_offset = process_control_point(current_point, result, last_intersection_offset); // if the current point is a control point, processes it. Otherwise, skips it.
+        last_intersection_offset = process_control_point(current_point, result, return_type, last_intersection_offset); // if the current point is a control point, processes it. Otherwise, skips it.
         current_point = current_point->next;
       }
       is_inside = false;
@@ -927,7 +942,7 @@ std::vector<Spline*> filter_nurbs(blender::Span<SplinePtr> s)
   int size = s.size();
   for(const SplinePtr &spline : s)
   {
-    if(spline->type() != Spline::Type::NURBS)
+    //if(spline->type() != Spline::Type::NURBS)
       result.push_back(spline.get());
   }
 
@@ -1039,17 +1054,17 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
       if (type == BoolDomainType::SUB)
       {
         if(counter % 2 == (path->curve_id == 0 ? 0 : 1))
-          copy_curve(results,path);
+          copy_curve(results,path, result_type);
       }
       else if(type == BoolDomainType::OR)
       {
         if(counter % 2 == 0)
-          copy_curve(results,path);
+          copy_curve(results,path, result_type);
       }
       else if(type == BoolDomainType::AND)
       {
         if(counter % 2 == 1)
-          copy_curve(results,path);
+          copy_curve(results,path, result_type);
       }
     }
     else
