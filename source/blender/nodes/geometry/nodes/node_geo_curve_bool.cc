@@ -44,9 +44,8 @@
  * BUGS:
  *
  * TODO:
- * Mixed Bezier + Vertex Paths => Set evaluated points in Bezier, not just control points.
- * Splines to bezier conversion.
  * Fix memory leak.
+ * Splines to bezier conversion.
  * Optional hard corners so attributes like radius stick
  * Conformity slider : If 1, map intersection points to geometry, if 0, map to bezier curve. Interpolate between.
  * If either of the curves self intersect, show a warning.
@@ -207,16 +206,8 @@ static blender::float2 linesIntersect(blender::float3 A, blender::float3 B, blen
   return blender::float2(t, u);
 }
 
-struct CurveHull;
 
-struct Intersection
-{
-  float v;               // distance between the current point and the next, in [0,1)
-  Intersection *target;  // segment this segment intersects with
-  int _target_i;         // index within target's "intersections" vector
-  CurveHull *hull;      // self
-  int pass = -1;
-};
+struct Intersection;
 
 // Generate COMPLETE map of all intersections as a double linked list.
 struct CurveHull
@@ -283,9 +274,53 @@ struct CurveHull
     return next->next_intersection2(true, __start);
   }
 
+/**
+ * Removes this and all following points as well as their intersection structs.
+ */
   void remove()
   {
-    // TODO : Remove all children and all intersections
+	// for( int i = 0; i < intersections.size(); i++)
+	// {
+	// 	delete intersections[i];
+	// }
+
+
+
+	if(prev != nullptr)
+		prev->next = nullptr;
+
+	if(next != nullptr)
+	{
+		next->prev = nullptr;
+		next->remove();
+	}
+	if(intersection != nullptr)
+		delete intersection;
+
+	delete this;
+  }
+};
+
+struct Intersection
+{
+  float v;               // distance between the current point and the next, in [0,1)
+  Intersection *target;  // segment this segment intersects with
+  int _target_i;         // index within target's "intersections" vector
+  CurveHull *hull;      // self
+  int pass = -1;
+
+  /**
+   * Delete this memory. Will remove the intersection from the hull, but not from the control point's intersection list.
+   */
+  ~Intersection()
+  {
+	  if(target != nullptr)
+	  {
+		  target->target = nullptr;
+		  delete target;
+	  }
+
+	  hull->intersection = nullptr;
   }
 };
 
@@ -590,15 +625,13 @@ static float process_control_point(CurveHull* current_point, std::vector<SplineP
   {
     Spline *current_spline = current_point->spline;
 
-    float current_absolute_v = current_point->v * segment_count;
-    int current_control_point = (int)(current_absolute_v);
     int current_segment_end = (current_control_point + 1) % current_spline->positions().size();
     float current_relative_v = fmod(current_absolute_v , 1);
     result.push_back(
       SplinePoint(
         current_spline->evaluated_positions()[current_point->curve_i],
         (1 - current_relative_v) * current_spline->radii()[current_control_point] + current_relative_v * current_spline->radii()[current_segment_end],
-        (1 - current_relative_v) * current_spline->tilts()[current_control_point] + current_relative_v * current_spline->tilts()[current_segment_end]) // TODO : Interpolate? But it'll be wrong either way, so why bother?
+        (1 - current_relative_v) * current_spline->tilts()[current_control_point] + current_relative_v * current_spline->tilts()[current_segment_end])
       );
   }
 
@@ -918,34 +951,18 @@ static bool is_curve_clockwise(Spline* spline)
   return dotsum >= 0;
 }
 
-// template<typename T>
-// std::vector<SplinePtr> filter_span(blender::Span<SplinePtr> s, std::function<bool(const SplinePtr&)> l) // bool(*l)(SplinePtr)
-// {
-//   std::vector<SplinePtr> result = {};
-//   int size = s.size();
-//   for(int64_t i = 0; i < size; i++)
-//   {
-//     if(l(s.get(i)))
-//       result.push_back(s.get(i), nullp);
-//   }
 
-//   return result;
-// }
-
-// filter_span<SplinePtr>(a->splines(),[](const SplinePtr& spline)->bool{return (bool)(spline->type() == Spline::Type::Bezier);});
-
-
-std::vector<Spline*> filter_nurbs(blender::Span<SplinePtr> s)
+/**
+ * I don't know how to work with blender's Spans or with the unique pointer replacements. So we'll convert them to a vector of regular pointers for the time being. We're not violating the unique pointer anyways.
+ */
+std::vector<Spline*> _unrwap_splines(blender::Span<SplinePtr> s)
 {
   std::vector<Spline*> result = {};
-
   int size = s.size();
   for(const SplinePtr &spline : s)
   {
-    //if(spline->type() != Spline::Type::NURBS)
-      result.push_back(spline.get());
+    result.push_back(spline.get());
   }
-
   return result;
 }
 
@@ -963,8 +980,8 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
   std::unique_ptr<CurveEval> result = std::make_unique<CurveEval>();
 
   const char *types[] = {"Bezier", "NURBS", "Poly"};
-  std::vector<Spline*> splines_a = filter_nurbs(a->splines());  // each CurveEval object can contain several unconnected curves.
-  std::vector<Spline*> splines_b = filter_nurbs(b->splines());
+  std::vector<Spline*> splines_a = _unrwap_splines(a->splines());  // SplinePtr is a unique ptr. We're not modifying those, we just want their data. So we cast to Spline* from the get-go.
+  std::vector<Spline*> splines_b = _unrwap_splines(b->splines());
   std::vector<std::vector<Spline*>> splines = {splines_a, splines_b};
 
   Spline::Type result_type = Spline::Type::Bezier;
@@ -985,7 +1002,7 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
       // All bezier handles must be free or else updating the curve will "correct" them.
       if(spline->type() == Spline::Type::Bezier)
       {
-        // TODO : If result_type == Poly, convert.
+        // TODO : If result_type == Poly, convert to bezier.
 
         BezierSpline* bezier_spline = ((BezierSpline*)spline);
         MutableSpan<BezierSpline::HandleType> handles_left_t = bezier_spline->handle_types_left();
@@ -1070,6 +1087,8 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
     else
       trace_hull(results, path, type, result_type);
 
+
+
     // Now turn our virtual control points into a real bezier curve
 
     if(result_type == Spline::Type::Bezier)
@@ -1103,6 +1122,12 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
       }
     }
   }
+
+  for(CurveHull *path : paths)
+  {
+  	path->remove();
+  }
+
   result->attributes.reallocate(length);
 
   print("FINALIZING");
