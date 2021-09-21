@@ -38,7 +38,7 @@
  *
  *
  * Missing Features:
- * Per segment curve attributes. Like resolution.
+ * Per segment curve attributes. Like resolution. Or material
  * Geometry Nodes on Curve object or Apply as Curve Operation
  *
  * BUGS:
@@ -1087,22 +1087,16 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
     else
       trace_hull(results, path, type, result_type);
 
-
-
     // Now turn our virtual control points into a real bezier curve
-
     if(result_type == Spline::Type::Bezier)
     {
       for(std::vector<SplinePoint> trace : results)
       {
         std::unique_ptr<BezierSpline>  result_spline = std::make_unique<BezierSpline>();
         result_spline->set_resolution(resolution);
-
         trace_to_bezier(trace,result_spline.get());
         result_spline->set_cyclic(true);
-
         result->add_spline(std::move(result_spline));
-
         length += result->splines().size();
       }
     }
@@ -1111,18 +1105,16 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
       for(std::vector<SplinePoint> trace : results)
       {
         std::unique_ptr<PolySpline>  result_spline = std::make_unique<PolySpline>();
-        //result_spline->set_resolution(resolution);
-
         trace_to_poly(trace,result_spline.get());
         result_spline->set_cyclic(true);
-
         result->add_spline(std::move(result_spline));
-
         length += result->splines().size();
       }
     }
   }
 
+
+  // Remove all CurveHull and Intersection helper structs. These were created with new().
   for(CurveHull *path : paths)
   {
   	path->remove();
