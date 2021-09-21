@@ -5175,6 +5175,7 @@ static void registerGeometryNodes()
   register_node_type_geo_attribute_randomize();
   register_node_type_geo_attribute_remove();
   register_node_type_geo_attribute_separate_xyz();
+  register_node_type_geo_attribute_statistic();
   register_node_type_geo_attribute_transfer();
   register_node_type_geo_attribute_vector_math();
   register_node_type_geo_attribute_vector_rotate();
@@ -5182,6 +5183,7 @@ static void registerGeometryNodes()
   register_node_type_geo_bounding_box();
   register_node_type_geo_collection_info();
   register_node_type_geo_convex_hull();
+  register_node_type_geo_curve_sample();
   register_node_type_geo_curve_endpoints();
   register_node_type_geo_curve_fill();
   register_node_type_geo_curve_length();
@@ -5230,6 +5232,7 @@ static void registerGeometryNodes()
   register_node_type_geo_point_translate();
   register_node_type_geo_points_to_volume();
   register_node_type_geo_raycast();
+  register_node_type_geo_realize_instances();
   register_node_type_geo_sample_texture();
   register_node_type_geo_select_by_handle_type();
   register_node_type_geo_material_selection();

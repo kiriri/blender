@@ -1774,7 +1774,7 @@ static void do_versions_seq_set_cache_defaults(Editing *ed)
 
 static bool seq_update_flags_cb(Sequence *seq, void *UNUSED(user_data))
 {
-  seq->flag &= ~(SEQ_FLAG_UNUSED_6 | SEQ_FLAG_UNUSED_18 | SEQ_FLAG_UNUSED_19 | SEQ_FLAG_UNUSED_21);
+  seq->flag &= ~((1 << 6) | (1 << 18) | (1 << 19) | (1 << 21));
   if (seq->type == SEQ_TYPE_SPEED) {
     SpeedControlVars *s = (SpeedControlVars *)seq->effectdata;
     s->flags &= ~(SEQ_SPEED_UNUSED_1);
@@ -4966,7 +4966,7 @@ void blo_do_versions_280(FileData *fd, Library *UNUSED(lib), Main *bmain)
         for (SpaceLink *sl = area->spacedata.first; sl; sl = sl->next) {
           if (sl->spacetype == SPACE_SEQ) {
             SpaceSeq *sseq = (SpaceSeq *)sl;
-            sseq->flag |= SEQ_SHOW_FCURVES;
+            sseq->flag |= SEQ_TIMELINE_SHOW_FCURVES;
           }
         }
       }

@@ -161,6 +161,7 @@ set(SRC
   geometry/nodes/node_geo_attribute_remove.cc
   geometry/nodes/node_geo_attribute_sample_texture.cc
   geometry/nodes/node_geo_attribute_separate_xyz.cc
+  geometry/nodes/node_geo_attribute_statistic.cc
   geometry/nodes/node_geo_attribute_transfer.cc
   geometry/nodes/node_geo_attribute_vector_math.cc
   geometry/nodes/node_geo_attribute_vector_rotate.cc
@@ -169,6 +170,7 @@ set(SRC
   geometry/nodes/node_geo_collection_info.cc
   geometry/nodes/node_geo_common.cc
   geometry/nodes/node_geo_convex_hull.cc
+  geometry/nodes/node_geo_curve_sample.cc
   geometry/nodes/node_geo_curve_endpoints.cc
   geometry/nodes/node_geo_curve_fill.cc
   geometry/nodes/node_geo_curve_length.cc
@@ -219,6 +221,7 @@ set(SRC
   geometry/nodes/node_geo_point_translate.cc
   geometry/nodes/node_geo_points_to_volume.cc
   geometry/nodes/node_geo_raycast.cc
+  geometry/nodes/node_geo_realize_instances.cc
   geometry/nodes/node_geo_separate_components.cc
   geometry/nodes/node_geo_set_position.cc
   geometry/nodes/node_geo_subdivision_surface.cc
