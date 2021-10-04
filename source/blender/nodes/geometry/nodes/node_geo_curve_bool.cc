@@ -24,34 +24,14 @@
 /**
  * This file implements the Curve 2D Boolean geometry node.
  *
- * THIS VS CLIPPER
- *
- * PROS:
- * - Returns actual user-friendly bezier curves.
- * - Can run at low resolution, then scale back up.
- * - Can preserve attributes like radius.
- * - Can be used outside of the Node as a bezier curve operation.
- * - Mostly finished anyways
- * CONS:
- * - Harder, less clean
- * - Has to handle poly separately, and has to convert splines to beziers.
- *
- *
- * Missing Features:
- * Per segment curve attributes. Like resolution. Or material
- * Geometry Nodes on Curve object or Apply as Curve Operation
- *
  * BUGS:
  *
  * TODO:
  * Line Segment intersection library
  * Splines to bezier conversion.
- * Optional hard corners so attributes like radius stick
+ * Optional hard corners so attributes like radius stick. Or maybe an enum to define which curve should provide attributes for intersection points.
  * Conformity slider : If 1, map intersection points to geometry, if 0, map to bezier curve. Interpolate between.
  * If either of the curves self intersect, show a warning.
- *
- *
- *
  */
 
 static bNodeSocketTemplate geo_node_curve_bool_in[] = {
@@ -136,9 +116,7 @@ static int all_curve_contains(Span<Spline *> splines, float3 point, const Spline
   int counter = 0;
   for (Spline *spline : splines)
   {
-    if (spline == except)
-      continue;
-    if (curve_contains(spline, point))
+    if ( (spline != except) && curve_contains(spline, point))
       counter++;
   }
   return counter;
@@ -164,13 +142,6 @@ static blender::float2 linesIntersect(blender::float3 A, blender::float3 B, blen
 
   if (CmAxBmA == 0.f)  // Lines are collinear. They intersect if they have any overlap. But we don't want that because we need discrete intersections.
     return blender::float2(-1, -1);
-  // if (((C.x - A.x < 0.f) != (C.x - B.x < 0.f)) || ((C.y - A.y < 0.f) != (C.y - B.y < 0.f)))
-  //   return blender::float2(0, 0);
-  // else
-  //   return blender::float2(-1, -1);
-
-  //   if (BmAxDmC == 0.f)  // Lines are parallel.
-  //     return blender::float2(-1, -1);
 
   float rxsr = 1.f / BmAxDmC;
   float t = CmAxDmC * rxsr;
@@ -187,27 +158,11 @@ struct CurveHull;
 
 struct Intersection
 {
-
   float v;               // distance between the current point and the next, in [0,1)
   Intersection *target;  // segment this segment intersects with
   int _target_i;         // index within target's "intersections" vector
   CurveHull *hull;       // self
   int pass = -1;
-
-  /**
-   * Delete this memory. Will remove the intersection from the hull, but not from the control point's intersection list.
-   * This is unnecessary in this script, but may be important elsewhere.
-   */
-  //   ~Intersection()
-  //   {
-  // 	  if(target != nullptr)
-  // 	  {
-  // 		  target->target = nullptr;
-  // 		  delete target;
-  // 	  }
-
-  // 	  hull->intersection = nullptr;
-  //   }
 };
 
 // Generate COMPLETE map of all connected points and intersections as a double linked list.
@@ -247,14 +202,10 @@ struct CurveHull
   CurveHull *next_intersection(bool include_self = false, CurveHull *__start = nullptr)
   {
     if (include_self && intersection != nullptr)
-    {
       return this;
-    }
 
     if (next == nullptr)
-    {
       return nullptr;
-    }
 
     if (__start == this)  // don't loop
       return nullptr;
@@ -317,13 +268,11 @@ static CurveHull *points_to_hull(Spline *spline, int curve_id)
 
 /**
  * Check if 2 Bounds intersect
- * Each bounds must consist of 2 float3s, first min point, then max point
+ * Each bounds must consist of 2 float2s, first min point, then max point
  */
-static bool bounds_intersect(float3 bounds_a_min, float3 bounds_a_max, float3 bounds_b_min, float3 bounds_b_max)
+static bool bounds_intersect(float2 bounds_a_min, float2 bounds_a_max, float2 bounds_b_min, float2 bounds_b_max)
 {
-  return
-  (bounds_a_min.x < bounds_b_max.x) && (bounds_a_max.x > bounds_b_min.x) &&
-  (bounds_a_min.y < bounds_b_max.y) && (bounds_a_max.y > bounds_b_min.y) ;
+  return (bounds_a_min.x < bounds_b_max.x) && (bounds_a_max.x > bounds_b_min.x) &&(bounds_a_min.y < bounds_b_max.y) && (bounds_a_max.y > bounds_b_min.y) ;
 }
 
 /**
@@ -334,14 +283,12 @@ static bool bounds_intersect(float3 bounds_a_min, float3 bounds_a_max, float3 bo
 static std::list<CurveHull *> bezierIntersectAll2(std::vector<std::vector<Spline *>> splines)
 {
   // TODO : Option to allow self intersection in exchange for brute force collision algorithm
-  // TODO : Option for convex shapes (probably a dozend more optimizations possible)
+  // TODO : Option for convex shapes ( a lot more optimizable )
 
   std::list<CurveHull *> results;
   std::list<CurveHull *> frontier;
 
-  // TODO :
-  // Calculate Bounds for each spline.
-  // Don't compare segments from splines which don't intersect by bounds
+  // TODO : Create Binary search tree from bounds (Needs some kind of clumping heuristics.)
 
   std::vector<float3> bounds;
 
@@ -364,10 +311,8 @@ static std::list<CurveHull *> bezierIntersectAll2(std::vector<std::vector<Spline
   }
 
   c = frontier.size();
-
   int pass = 0;
   int i = -1;  // refers to bounds array
-
   while (frontier.size() > 0)
   {
     i++;
@@ -379,19 +324,18 @@ static std::list<CurveHull *> bezierIntersectAll2(std::vector<std::vector<Spline
     {
       pass++;
       j++;
+
       if(primary_curve->curve_id == curve_hull_b->curve_id || !bounds_intersect(bounds[i * 2], bounds[i * 2 + 1], bounds[j * 2], bounds[j * 2 + 1]))//
         continue;
 
       CurveHull *current_curve_hull_a = primary_curve;
       CurveHull *next_curve_hull_a = primary_curve->next;
-
       while (current_curve_hull_a != nullptr && next_curve_hull_a != nullptr && current_curve_hull_a->pass != pass)
       {
         current_curve_hull_a->pass = pass;
 
         CurveHull *current_curve_hull_b = curve_hull_b;
         CurveHull *next_curve_hull_b = curve_hull_b->next;
-
         do  // b loops from start to start, and won't loop new segments because they aren't cyclic.
         {
           blender::float2 intersection = linesIntersect(current_curve_hull_a->position, next_curve_hull_a->position, current_curve_hull_b->position, next_curve_hull_b->position);
@@ -424,8 +368,8 @@ static std::list<CurveHull *> bezierIntersectAll2(std::vector<std::vector<Spline
   {
     CurveHull *start = current_point;
     float curve_length = current_point->spline->evaluated_points_size() + (current_point->spline->is_cyclic() ? 0 : -1);
-    do
-    {  // Then create all intersection points as actual points. We didn't do this earlier to avoid extra intersection calculations with the new line segments.
+    do // Then create all intersection points as actual points. We didn't do this earlier to avoid extra intersection calculations with the new line segments.
+    {
       std::vector<Intersection *> &intersections = current_point->intersections;
       // Sort the intersections by progress along line / v.
       std::sort(intersections.begin(), intersections.end(), [](Intersection *a, Intersection *b) { return a->v < b->v; });
@@ -444,8 +388,7 @@ static std::list<CurveHull *> bezierIntersectAll2(std::vector<std::vector<Spline
       int i = 0;
       for (auto intersection : current_point->intersections)
       {
-        intersection->_target_i = i;
-        i++;
+        intersection->_target_i = i++;
       }
 
       current_point = current_point->next;
@@ -599,7 +542,6 @@ static float process_control_point(CurveHull *current_point, std::vector<SplineP
  */
 static CurveHull *process_intersection(CurveHull *current_point, std::vector<SplinePoint> &result, float &last_intersection_offset, std::list<CurveHull *> &frontier, Spline::Type type, bool pass_through = false)
 {
-
   bool first = result.size() == 0;
   float v_next = 0;
   Intersection *current_intersection = current_point->intersection;
@@ -657,17 +599,8 @@ static CurveHull *process_intersection(CurveHull *current_point, std::vector<Spl
     float current_absolute_v = current_point->curve_i / (float)(current_resolution);  // TODO : How do we derive the same from current_point->v? current_point->v * segment_count
     int current_control_point = (int)(current_absolute_v);
     int current_segment_end = (current_control_point + 1) % current_spline->positions().size();
-    //print("compare" + std::to_string(current_spline->positions().size() == current_spline->radii().size()));
 
     auto radii = current_spline->radii(); // BUG : Why does radius sometimes spazz out? This is absurd... (Happens only with PolyLine)
-    if(radii[current_control_point] < 0)
-      print("Spazzout at " + std::to_string(current_control_point) + " = " + std::to_string(radii[current_control_point]));
-    if(radii[current_segment_end] < 0)
-      print("Spazzout2 at " + std::to_string(current_segment_end) + " = " + std::to_string(radii[current_segment_end]));
-    if(current_intersection->v < 0)
-      print("Smol");
-    if(current_intersection->v > 1)
-      print("Big" + std::to_string(current_intersection->v));
     float3 real_pos = current_intersection->hull->position;
     result.push_back(SplinePoint(
       real_pos,
@@ -679,14 +612,11 @@ static CurveHull *process_intersection(CurveHull *current_point, std::vector<Spl
   if (first && pass_through)
   {
     last_intersection_offset = v_next;
-    // current_point->pass = -2;
     other_point->pass = -2;
 
     CurveHull *next_possible_frontier = current_point->next_intersection();
     if (next_possible_frontier != nullptr)
-    {
       frontier.push_back(next_possible_frontier->intersection->target->hull);
-    }
 
     return other_point->next;
   }
@@ -697,9 +627,8 @@ static CurveHull *process_intersection(CurveHull *current_point, std::vector<Spl
 
     CurveHull *next_possible_frontier = current_point->next_intersection();
     if (next_possible_frontier != nullptr)
-    {
       frontier.push_back(next_possible_frontier->intersection->target->hull);
-    }
+
     return other_point->next;
   }
 }
@@ -799,9 +728,8 @@ static void trace_hull(std::vector<std::vector<SplinePoint>> &results, CurveHull
     if (current_point != nullptr)  // if cyclical result
     {
       if ((current_point != start_point) && (current_point->intersection == nullptr || current_point->intersection->target->hull != start_point))
-      {
         continue;  // skip, didn't reach a valid target.
-      }
+
       if (return_type == Spline::Type::Bezier)
       {
         // if cyclic, make sure the initial point's left handle scales with any previous intersection. (If not cyclic, those handles aren't used)
@@ -869,9 +797,7 @@ static bool is_curve_clockwise(Spline *spline)
   }
 
   if (spline->is_cyclic())
-  {
     dotsum += (points[0].x - points[points.size() - 1].x) * (points[0].y + points[points.size() - 1].y);
-  }
 
   return dotsum >= 0;
 }
@@ -946,11 +872,8 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
       // Outside curves must go clockwise
       // Inside curves must go counterclockwise
       int counter = all_curve_contains(_splines, spline->positions()[0], spline);
-
       if (counter % 2 == (is_clockwise ? 1 : 0))  // curve represents negative space, must go counterclockwise
-      {
         switch_direction(spline);
-      }
     }
   }
 
