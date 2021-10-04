@@ -44,7 +44,7 @@
  * BUGS:
  *
  * TODO:
- * Fix memory leak.
+ * Line Segment intersection library
  * Splines to bezier conversion.
  * Optional hard corners so attributes like radius stick
  * Conformity slider : If 1, map intersection points to geometry, if 0, map to bezier curve. Interpolate between.
@@ -72,54 +72,49 @@ static void geo_node_curve_bool_layout(uiLayout *layout, bContext *UNUSED(C), Po
   uiItemR(layout, ptr, "domain", 0, "", ICON_NONE);
 }
 
-namespace blender::nodes
-{
 
-void print_a(std::list<blender::float2> const &list)
-{
-  for (auto const &i : list)
-  {
-    std::cout << i << std::endl << std::flush;
-  }
-}
 
-void print_a(std::list<blender::float3> const &list)
-{
-  for (auto const &i : list)
-  {
-    std::cout << i << std::endl << std::flush;
-  }
-}
+/**
+ * DEBUG CODE START
+ */
 
-void print(std::string s)
+static void print(std::string s)
 {
   std::cout << s << std::endl << std::flush;
 }
 
-static std::chrono::_V2::system_clock::time_point time;
+static std::chrono::_V2::system_clock::time_point __time;
 
 /**
  * See stop_clock()
  */
-void start_clock()
+static void start_clock()
 {
-    time = std::chrono::high_resolution_clock::now();
+    __time = std::chrono::high_resolution_clock::now();
 }
 
 /**
  * Print the time since the last start_clock call in ns.
  */
-void stop_clock(std::string label)
+static void stop_clock(std::string label)
 {
     auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - time);
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - __time);
     std::cout << "Time taken by function " << label << " : "
          << duration.count() << " microseconds" << std::endl << std::flush;
 }
 
 /**
+ * DEBUG CODE END
+ */
+
+
+
+namespace blender::nodes
+{
+/**
  * Does the curve contain the point?
- * This may result in weird results if the curve is not closed
+ * This is always false if the curve is open.
  */
 static bool curve_contains(Spline *spline, blender::float3 point)
 {
@@ -135,19 +130,6 @@ static bool curve_contains(Spline *spline, blender::float3 point)
       c = !c;
   }
   return c;  // if even, point is outside ( return false )
-}
-
-/**
- * Does any of the splines contain the given point?
- */
-static bool any_curve_contains(Span<Spline*> splines, float3 point)
-{
-  for(Spline* spline : splines)
-  {
-    if(curve_contains(spline,point))
-      return true;
-  }
-  return false;
 }
 
 /**
@@ -192,8 +174,8 @@ static blender::float2 linesIntersect(blender::float3 A, blender::float3 B, blen
     // else
     //   return blender::float2(-1, -1);
 
-  if (BmAxDmC == 0.f)  // Lines are parallel.
-    return blender::float2(-1, -1);
+//   if (BmAxDmC == 0.f)  // Lines are parallel.
+//     return blender::float2(-1, -1);
 
   float rxsr = 1.f / BmAxDmC;
   float t = CmAxDmC * rxsr;
@@ -206,10 +188,35 @@ static blender::float2 linesIntersect(blender::float3 A, blender::float3 B, blen
   return blender::float2(t, u);
 }
 
+struct CurveHull;
 
-struct Intersection;
+struct Intersection
+{
 
-// Generate COMPLETE map of all intersections as a double linked list.
+  float v;               // distance between the current point and the next, in [0,1)
+  Intersection *target;  // segment this segment intersects with
+  int _target_i;         // index within target's "intersections" vector
+  CurveHull *hull;      // self
+  int pass = -1;
+
+
+  /**
+   * Delete this memory. Will remove the intersection from the hull, but not from the control point's intersection list.
+   * This is unnecessary in this script, but may be important elsewhere.
+   */
+//   ~Intersection()
+//   {
+// 	  if(target != nullptr)
+// 	  {
+// 		  target->target = nullptr;
+// 		  delete target;
+// 	  }
+
+// 	  hull->intersection = nullptr;
+//   }
+};
+
+// Generate COMPLETE map of all connected points and intersections as a double linked list.
 struct CurveHull
 {
   int curve_id;  // used to identify which curve we're on, which is useful if self-intersection is disabled.
@@ -220,7 +227,7 @@ struct CurveHull
   CurveHull *next = nullptr;
   CurveHull *prev = nullptr;
   Intersection *intersection = nullptr; // If not nullptr, this is a virtual CurveHull point, that denotes an intersection.
-  std::vector<Intersection *> intersections;  // Used to collect intersections without creating additional segments
+  std::vector<Intersection *> intersections;  // Used to collect intersections without creating additional segments. Only control points have anything in here.
   int pass = -1;
   int is_inside = -1; // used when tracing. If true, the next intersection is passed right through. 0 means false, 1 means true, -1 means undefined
 
@@ -276,16 +283,10 @@ struct CurveHull
 
 /**
  * Removes this and all following points as well as their intersection structs.
+ * If a control point gets removed, none of the intersections along its segment get removed. You must remove the actual intersection CurveHullPoints for that.
  */
   void remove()
   {
-	// for( int i = 0; i < intersections.size(); i++)
-	// {
-	// 	delete intersections[i];
-	// }
-
-
-
 	if(prev != nullptr)
 		prev->next = nullptr;
 
@@ -301,28 +302,6 @@ struct CurveHull
   }
 };
 
-struct Intersection
-{
-  float v;               // distance between the current point and the next, in [0,1)
-  Intersection *target;  // segment this segment intersects with
-  int _target_i;         // index within target's "intersections" vector
-  CurveHull *hull;      // self
-  int pass = -1;
-
-  /**
-   * Delete this memory. Will remove the intersection from the hull, but not from the control point's intersection list.
-   */
-  ~Intersection()
-  {
-	  if(target != nullptr)
-	  {
-		  target->target = nullptr;
-		  delete target;
-	  }
-
-	  hull->intersection = nullptr;
-  }
-};
 
 /**
  * Convert a path into a CurveHull form, which is a double linked list with extra variables for tracing along intersections lateron.
@@ -403,7 +382,6 @@ static std::list<CurveHull *> bezierIntersectAll2(std::vector<std::vector<Spline
         if (curve_hull_b->curve_id == current_curve_hull_a->curve_id)  // TODO : Only if self intersection is off
           continue;
 
-        CurveHull *start_b = curve_hull_b;
         CurveHull *current_curve_hull_b = curve_hull_b;
         CurveHull *next_curve_hull_b = curve_hull_b->next;
 
@@ -483,7 +461,7 @@ static std::list<CurveHull *> bezierIntersectAll2(std::vector<std::vector<Spline
 
 /**
  * Switch the direction of the spline.
- * TODO : Switch tilt and radius and whatever else gets changed when spline->resize() is called.
+ * // TODO : What about custom point attributes? Where are those stored?
  */
 static int switch_direction(Spline *spline)
 {
@@ -570,7 +548,7 @@ struct SplinePoint
 
   SplinePoint(float3 position,
   float radius,
-  float tilt):position(position),handle_position_left(handle_position_left),handle_position_right(handle_position_right),radius(radius),tilt(tilt)
+  float tilt):position(position),radius(radius),tilt(tilt)
   {
   }
 };
@@ -579,7 +557,7 @@ struct SplinePoint
  * Given a bezier curve segment described by 2 points and 2 handles, generate an extra point at v along the curve and return
  * both the new point's position and handles, as well as the modified handles of the initial points.
  */
-BezierSpline::InsertResult calculate_bezier_segment_insertion(float3 pos_prev, float3 handle_prev, float3 pos_next, float3 handle_next, float v )
+static BezierSpline::InsertResult calculate_bezier_segment_insertion(float3 pos_prev, float3 handle_prev, float3 pos_next, float3 handle_next, float v )
 {
   const float3 center_point = float3::interpolate(handle_prev, handle_next, v);
 
@@ -667,15 +645,10 @@ static CurveHull* process_intersection(CurveHull* current_point, std::vector<Spl
     float current_absolute_v = current_point->curve_i / (float)(current_resolution); // TODO : How do we derive the same from current_point->v? current_point->v * segment_count
     int current_control_point = (int)(current_absolute_v);
     float current_relative_v = fmod(current_absolute_v , 1);
-    //float current_relative_v = fmod((current_point->v * segment_count),1.0f);
 
     float next_absolute_v = other_point->curve_i / (float)(next_resolution);
     int next_control_point = (int)(next_absolute_v);
     float next_relative_v = fmod(next_absolute_v, 1);
-    //float next_relative_v = fmod((next_point->v * segment_count_next),1.0f);
-
-    int current_evaluated_i = current_intersection->hull->curve_i;
-    int next_evaluated_i = (current_intersection->hull->curve_i + 1) % current_spline->evaluated_points_size();
 
     int current_segment_end = (current_control_point + 1) % current_spline->positions().size();
 
@@ -706,8 +679,8 @@ static CurveHull* process_intersection(CurveHull* current_point, std::vector<Spl
       result.back().handle_position_right = insert_current.handle_prev;
 
     float3 real_pos = current_intersection->hull->position; // the intersection point on the EVALUATED geometry
-    float3 bezier_pos_current = insert_current.position; // the intersection point the handles belong to (can vary drastically if resolution is very low)
-    float3 bezier_pos_next = insert_next.position;
+    //float3 bezier_pos_current = insert_current.position; // the intersection point the handles belong to (can vary drastically if resolution is very low)
+    //float3 bezier_pos_next = insert_next.position;
 
     result.push_back(
       SplinePoint(
@@ -721,7 +694,6 @@ static CurveHull* process_intersection(CurveHull* current_point, std::vector<Spl
   else
   {
     Spline *current_spline = current_point->spline;
-    Spline *other_spline = other_point->spline;
 
     float current_absolute_v = current_point->v * segment_count;//current_point->curve_i / (float)(current_resolution); // TODO : How do we derive the same from current_point->v? current_point->v * segment_count
     int current_control_point = (int)(current_absolute_v);
@@ -875,8 +847,6 @@ static void trace_hull(std::vector<std::vector<SplinePoint>> &results, CurveHull
         {
           int segment_count = current_point->spline->segments_size() ;
 
-          BezierSpline *current_spline = (BezierSpline *)current_point->spline;
-
           float current_relative_v = fmod((start_point->v * segment_count),1.0f);
 
           // both handles are already resized to the following sizes
@@ -886,7 +856,6 @@ static void trace_hull(std::vector<std::vector<SplinePoint>> &results, CurveHull
           // but because of this new intersection, they will need to be this size instead
           float proportional_distance_right = (1 - current_relative_v) / expected_distance_right;
           float proportional_distance_left = last_intersection_offset / expected_distance_left;
-
 
           result.front().handle_position_left = float3::interpolate(result.front().handle_position_left,result.front().position,proportional_distance_left);
           result.back().handle_position_right = float3::interpolate(result.back().handle_position_right,result.back().position, proportional_distance_right );
@@ -951,14 +920,12 @@ static bool is_curve_clockwise(Spline* spline)
   return dotsum >= 0;
 }
 
-
 /**
  * I don't know how to work with blender's Spans or with the unique pointer replacements. So we'll convert them to a vector of regular pointers for the time being. We're not violating the unique pointer anyways.
  */
-std::vector<Spline*> _unrwap_splines(blender::Span<SplinePtr> s)
+static std::vector<Spline*> _unrwap_splines(blender::Span<SplinePtr> s)
 {
   std::vector<Spline*> result = {};
-  int size = s.size();
   for(const SplinePtr &spline : s)
   {
     result.push_back(spline.get());
@@ -979,7 +946,6 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
   const int resolution = 12;
   std::unique_ptr<CurveEval> result = std::make_unique<CurveEval>();
 
-  const char *types[] = {"Bezier", "NURBS", "Poly"};
   std::vector<Spline*> splines_a = _unrwap_splines(a->splines());  // SplinePtr is a unique ptr. We're not modifying those, we just want their data. So we cast to Spline* from the get-go.
   std::vector<Spline*> splines_b = _unrwap_splines(b->splines());
   std::vector<std::vector<Spline*>> splines = {splines_a, splines_b};
@@ -1007,8 +973,8 @@ static std::unique_ptr<CurveEval> generate_boolean_shapes(const CurveEval *a, co
         BezierSpline* bezier_spline = ((BezierSpline*)spline);
         MutableSpan<BezierSpline::HandleType> handles_left_t = bezier_spline->handle_types_left();
         MutableSpan<BezierSpline::HandleType> handles_right_t = bezier_spline->handle_types_right();
-        MutableSpan<float3> handles_left = bezier_spline->handle_positions_left(); // Bug : Don't remove ! This needs to be called or else the auto->free handle change loses the handle data. (It presumably flips some dirty flag that the handle_types alone don't but should)
-        MutableSpan<float3> handles_right = bezier_spline->handle_positions_right();
+        bezier_spline->handle_positions_left(); // Bug : Don't remove ! This needs to be called or else the auto->free handle change loses the handle data. (It presumably flips some dirty flag that the handle_types alone don't but should)
+        bezier_spline->handle_positions_right();
         int size = handles_left_t.size();
         for(int i = 0; i < size; i++)
         {
